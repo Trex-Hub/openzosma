@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { EventEmitter } from "node:events"
 import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { AgentProvider, AgentSession } from "@openzosma/agents"
@@ -17,12 +18,22 @@ interface SessionState {
 
 export class SessionManager {
 	private sessions = new Map<string, SessionState>()
+	private emitters = new Map<string, EventEmitter>()
 	private provider: AgentProvider
 	private pool: Pool | undefined
 
 	constructor(provider?: AgentProvider, pool?: Pool) {
 		this.provider = provider ?? new PiAgentProvider()
 		this.pool = pool
+	}
+
+	private getEmitter(sessionId: string): EventEmitter {
+		let emitter = this.emitters.get(sessionId)
+		if (!emitter) {
+			emitter = new EventEmitter()
+			this.emitters.set(sessionId, emitter)
+		}
+		return emitter
 	}
 
 	/**
@@ -90,6 +101,49 @@ export class SessionManager {
 		return this.sessions.get(id)?.session
 	}
 
+	deleteSession(id: string): boolean {
+		this.emitters.delete(id)
+		return this.sessions.delete(id)
+	}
+
+	/**
+	 * Subscribe to real-time events for a session. Yields events emitted by
+	 * any concurrent `sendMessage` call on this session. Keeps the generator
+	 * open until `signal` is aborted (client disconnects).
+	 *
+	 * Used by the SSE endpoint. Will be replaced by Valkey pub/sub in Phase 4.
+	 */
+	async *subscribe(sessionId: string, signal?: AbortSignal): AsyncGenerator<GatewayEvent> {
+		const emitter = this.getEmitter(sessionId)
+		const queue: GatewayEvent[] = []
+		let notify: (() => void) | undefined
+
+		const onEvent = (event: GatewayEvent) => {
+			queue.push(event)
+			notify?.()
+		}
+		const onAbort = () => notify?.()
+
+		emitter.on("event", onEvent)
+		signal?.addEventListener("abort", onAbort, { once: true })
+
+		try {
+			while (!signal?.aborted) {
+				if (queue.length > 0) {
+					yield queue.shift()!
+				} else {
+					await new Promise<void>((r) => {
+						notify = r
+					})
+					notify = undefined
+				}
+			}
+		} finally {
+			emitter.off("event", onEvent)
+			signal?.removeEventListener("abort", onAbort)
+		}
+	}
+
 	/**
 	 * Send a user message and stream back gateway events.
 	 *
@@ -121,10 +175,9 @@ export class SessionManager {
 
 		let lastAssistantText = ""
 		let lastMessageId: string | undefined
+		const emitter = this.getEmitter(sessionId)
 
 		for await (const event of agentSession.sendMessage(content, signal)) {
-			// AgentStreamEvent and GatewayEvent have the same shape --
-			// pass through directly, tracking text for session history.
 			const gatewayEvent: GatewayEvent = event as GatewayEvent
 
 			if (event.type === "message_start") {
@@ -134,6 +187,7 @@ export class SessionManager {
 				lastAssistantText += event.text
 			}
 
+			emitter.emit("event", gatewayEvent)
 			yield gatewayEvent
 		}
 
