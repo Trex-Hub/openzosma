@@ -1,0 +1,14 @@
+{
+	"dev": {
+		"driver": "pg",
+		"url": "postgresql://openzosma:openzosma@localhost:5432/openzosma",
+		"schema": "public"
+	},
+	"production": {
+		"driver": "pg",
+		"url": {
+			"ENV": "DATABASE_URL"
+		},
+		"schema": "public"
+	}
+}

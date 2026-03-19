@@ -21,9 +21,15 @@ export class SessionManager {
 		this.provider = provider ?? new PiAgentProvider()
 	}
 
-	createSession(): Session {
+	createSession(id?: string): Session {
+		// If the caller supplies an ID that already exists, return the existing session.
+		if (id) {
+			const existing = this.sessions.get(id)
+			if (existing) return existing.session
+		}
+
 		const session: Session = {
-			id: randomUUID(),
+			id: id ?? randomUUID(),
 			createdAt: new Date().toISOString(),
 			messages: [],
 		}
@@ -52,12 +58,17 @@ export class SessionManager {
 	 * AgentStreamEvents to GatewayEvents.
 	 */
 	async *sendMessage(sessionId: string, content: string, signal?: AbortSignal): AsyncGenerator<GatewayEvent> {
-		const state = this.sessions.get(sessionId)
-		if (!state) {
-			yield { type: "error", error: `Session ${sessionId} not found` }
-			return
+		// Auto-create session on first message if it doesn't exist yet.
+		// This allows the web app to use its own conversation IDs directly.
+		if (!this.sessions.has(sessionId)) {
+			this.createSession(sessionId)
 		}
 
+		const state = this.sessions.get(sessionId)
+		if (!state) {
+			yield { type: "error", error: `Session ${sessionId} could not be initialized` }
+			return
+		}
 		const { agentSession, session } = state
 
 		// Store user message

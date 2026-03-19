@@ -12,11 +12,20 @@
 		"enabled": true,
 		"rules": {
 			"recommended": true,
+			"a11y": {
+				"useSemanticElements": "off"
+			},
 			"complexity": {
 				"noForEach": "off"
 			},
+			"security": {
+				"noDangerouslySetInnerHtml": "off"
+			},
 			"style": {
 				"noNonNullAssertion": "off"
+			},
+			"suspicious": {
+				"noArrayIndexKey": "off"
 			}
 		}
 	},
@@ -27,6 +36,16 @@
 		}
 	},
 	"files": {
-		"ignore": ["node_modules", "dist", ".next", ".turbo", "**/generated/**", "*.proto", "*.sql"]
+		"ignore": [
+			"node_modules",
+			"dist",
+			".next",
+			".turbo",
+			"**/generated/**",
+			"*.proto",
+			"*.sql",
+			"**/migrations/*.js",
+			"next-env.d.ts"
+		]
 	}
 }

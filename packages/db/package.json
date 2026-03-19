@@ -15,10 +15,13 @@
 		"build": "tsc",
 		"check": "tsc --noEmit",
 		"migrate": "tsx src/migrate.ts up",
-		"migrate:down": "tsx src/migrate.ts down"
+		"migrate:down": "tsx src/migrate.ts down",
+		"migrate:auth": "tsx src/migrate-auth.ts",
+		"migrate:create": "db-migrate create --sql-file --migrations-dir migrations"
 	},
 	"dependencies": {
-		"node-pg-migrate": "^7.9.1",
+		"db-migrate": "^0.11.14",
+		"db-migrate-pg": "^1.5.2",
 		"pg": "^8.13.3"
 	},
 	"devDependencies": {

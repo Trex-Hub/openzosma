@@ -19,6 +19,8 @@
 		"format": "biome format --write .",
 		"db:migrate": "pnpm --filter @openzosma/db migrate",
 		"db:migrate:down": "pnpm --filter @openzosma/db migrate:down",
+		"db:migrate:auth": "pnpm --filter @openzosma/db migrate:auth",
+		"db:migrate:create": "pnpm --filter @openzosma/db migrate:create",
 		"proto:generate": "pnpm --filter @openzosma/grpc generate"
 	},
 	"pnpm": {

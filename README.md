@@ -48,11 +48,15 @@ pnpm install
 docker compose up -d
 
 # Copy environment config
-cp .env.example .env
-# Edit .env with your settings (LLM API keys, auth secret, etc.)
+cp .env.example .env.local
+# Edit .env.local with your settings (LLM API keys, auth secret, etc.)
 
-# Run database migrations
-pnpm db:migrate
+# Symlink .env.local into apps/web so Next.js can find it
+ln -s ../../.env.local apps/web/.env.local
+
+# Run database migrations (see "Database Migrations" section below)
+pnpm db:migrate        # Public schema tables (gateway + web app)
+pnpm db:migrate:auth   # Auth schema tables (better-auth)
 
 # Generate gRPC stubs from proto definitions
 pnpm proto:generate
@@ -63,6 +67,80 @@ pnpm run build
 # Type check
 pnpm run check
 ```
+
+### Database Migrations
+
+All migrations live in `packages/db/`. There are two separate migration systems:
+
+1. **`db-migrate`** -- manages `public` schema tables (gateway and web app tables)
+2. **`better-auth` CLI** -- manages `auth` schema tables (users, sessions, accounts, etc.)
+
+Both must be run before starting the application.
+
+#### Prerequisites
+
+PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension must be running and accessible. The default `docker compose up -d` uses the `pgvector/pgvector:pg16` image, which includes pgvector out of the box. If you manage PostgreSQL yourself, install the pgvector extension before running migrations.
+
+#### Environment Variables
+
+Migrations read database connection info from environment variables. They look for an `.env.local` file first, then `.env` in the repo root. You can also pass `--env-file=<path>` explicitly.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | _(built from DB\_\* vars)_ | Full PostgreSQL connection string |
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_NAME` | `openzosma` | Database name |
+| `DB_USER` | `openzosma` | Database user |
+| `DB_PASS` | `openzosma` | Database password |
+
+If `DATABASE_URL` is set, it takes precedence. Otherwise it is constructed from the individual `DB_*` variables.
+
+#### Running Migrations
+
+```bash
+# 1. Run public schema migrations (gateway + web app tables)
+pnpm db:migrate
+
+# 2. Run auth schema migrations (better-auth tables)
+pnpm db:migrate:auth
+```
+
+**Order matters:** Run `db:migrate` first (creates `public` schema tables), then `db:migrate:auth` (creates `auth` schema and its tables).
+
+#### Rolling Back
+
+```bash
+# Roll back the last public schema migration
+pnpm db:migrate:down
+```
+
+Auth migrations are managed by the better-auth CLI and do not have a rollback command.
+
+#### Creating New Migrations
+
+```bash
+# Creates a new migration with timestamp prefix + JS boilerplate + SQL files
+pnpm db:migrate:create -- <name>
+```
+
+This generates three files in `packages/db/migrations/`:
+
+```
+migrations/
+  <timestamp>-<name>.js                  # JS boilerplate (reads SQL files)
+  sqls/<timestamp>-<name>-up.sql         # Write your UP SQL here
+  sqls/<timestamp>-<name>-down.sql       # Write your DOWN SQL here
+```
+
+#### Using an Explicit Env File
+
+```bash
+pnpm db:migrate -- --env-file=/path/to/.env.production
+pnpm db:migrate:auth -- --env-file=/path/to/.env.production
+```
+
+See [`packages/db/README.md`](./packages/db/README.md) for detailed documentation on migration structure, schemas, and conventions.
 
 ### Docker (Development)
 
@@ -116,7 +194,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full system design.
 ```
 openzosma/
 ├── packages/
-│   ├── db/                   # node-pg-migrate migrations, raw SQL queries (PostgreSQL)
+│   ├── db/                   # db-migrate migrations, raw SQL queries (PostgreSQL)
 │   ├── auth/                 # Better Auth setup
 │   ├── gateway/              # Hono HTTP server (REST + WS + A2A)
 │   ├── orchestrator/         # Session lifecycle, sandbox pool
@@ -153,7 +231,7 @@ openzosma/
 | HTTP Server | Hono |
 | Internal RPC | gRPC (`@grpc/grpc-js`, `protobuf-ts`) |
 | A2A Protocol | `@a2a-js/sdk` + Hono |
-| Database | PostgreSQL (raw SQL via `pg`, migrations via `node-pg-migrate`) |
+| Database | PostgreSQL (raw SQL via `pg`, migrations via `db-migrate`) |
 | Cache / Pub-Sub | Valkey (Redis-compatible) |
 | Job Queue | RabbitMQ |
 | Auth | Better Auth |
