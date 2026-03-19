@@ -366,9 +366,6 @@ importers:
       hono:
         specifier: ^4.7.6
         version: 4.12.8
-      pg:
-        specifier: ^8.13.3
-        version: 8.20.0
       ws:
         specifier: ^8.18.1
         version: 8.19.0
@@ -376,9 +373,6 @@ importers:
       '@types/node':
         specifier: ^22.15.2
         version: 22.19.15
-      '@types/pg':
-        specifier: ^8.11.0
-        version: 8.18.0
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1

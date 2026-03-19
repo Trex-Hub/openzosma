@@ -12,12 +12,21 @@
  *   - canceled     = user canceled via tasks/cancel
  *
  * Agent Card:
- *   Each agent_configs row is one skill on the card. The row's `name` and
- *   `description` fields are used directly — no hardcoded metadata map.
+ *   One card for the whole instance. Skills are the union of skills[] tags
+ *   across all agent_configs rows. Display names come from SKILL_METADATA for
+ *   the three documented skills (coding, database, reports); unknown tags pass
+ *   through with an empty description. When a dedicated skills table is added
+ *   to the DB, SKILL_METADATA should be replaced by a query against it.
  *
- * Agent targeting:
- *   Callers may pass `agentConfigId` in task params to route the task to a
- *   specific agent config. Omitting it routes to the default agent.
+ * Skill-based routing:
+ *   Callers may pass `skillId` (e.g. "coding", "database") in task params to
+ *   route to the first agent config that advertises that skill. Omitting it
+ *   routes to the default agent (env-configured model, all tools).
+ *
+ * Delegation (stub):
+ *   TaskState carries a `parentTaskId` field for future agent-to-agent
+ *   delegation. Not yet exposed as a public RPC param. See the delegation
+ *   stub comment in createA2ARouter for the intended pattern.
  */
 
 import { Hono } from "hono"
@@ -46,12 +55,14 @@ interface A2AMessage {
 interface TaskState {
 	id: string
 	sessionId: string
+	/** Resolved internally from skillId — never set directly from RPC params. */
 	agentConfigId: string | undefined
 	/**
-	 * Set when this task was spawned by another task (delegation).
-	 * Kept on the state so taskView can surface it to the A2A caller for
-	 * debugging. To hide sub-tasks from callers later, remove this field
-	 * from taskView() — the state itself stays intact for internal tracking.
+	 * Delegation stub — set when this task is spawned by another task.
+	 * Not yet exposed as a public RPC param. When the delegation pattern is
+	 * implemented, a parent agent will call spawnSubTask() which sets this
+	 * field so the sub-task is traceable. To hide sub-tasks from A2A callers
+	 * later, remove parentTaskId from taskView() without touching this field.
 	 */
 	parentTaskId?: string
 	status: TaskStatus
@@ -76,7 +87,7 @@ const RPC_INVALID_PARAMS = -32602
 const RPC_INTERNAL_ERROR = -32603
 
 // ---------------------------------------------------------------------------
-// Dynamic Agent Card
+// Agent Card
 // ---------------------------------------------------------------------------
 
 export interface AgentCardSkill {
@@ -100,9 +111,32 @@ export interface AgentCard {
 }
 
 /**
- * Build the Agent Card from the agent_configs table.
- * Each row becomes one skill entry: id = config.id, name and description
- * come directly from the row. No hardcoded metadata.
+ * Known skill metadata keyed by skill ID.
+ *
+ * These are the three skills documented in Phase 3 and Phase 6. The
+ * agent_configs.skills column stores these as capability tags. Unknown IDs
+ * pass through with an empty description.
+ *
+ * Replace this map with a DB query when a dedicated skills table is added.
+ */
+const SKILL_METADATA: Record<string, Omit<AgentCardSkill, "id">> = {
+	coding: {
+		name: "Coding Assistant",
+		description: "Read, write, and edit code. Execute commands. Debug issues.",
+	},
+	database: {
+		name: "Database Querying",
+		description: "Query PostgreSQL, MySQL, MongoDB, ClickHouse, BigQuery, and SQLite databases.",
+	},
+	reports: {
+		name: "Report Generation",
+		description: "Generate PDF reports, PPTX presentations, and data visualizations.",
+	},
+}
+
+/**
+ * Build the Agent Card by unioning the skills[] tags across all agent_configs
+ * rows. Each unique tag becomes one skill entry on the card.
  */
 export async function buildAgentCard(pool: Pool): Promise<AgentCard> {
 	const [configs, publicUrl, instanceName] = await Promise.all([
@@ -111,10 +145,10 @@ export async function buildAgentCard(pool: Pool): Promise<AgentCard> {
 		settingQueries.getSettingValue<string>(pool, "instance_name"),
 	])
 
-	const skills: AgentCardSkill[] = configs.map((c) => ({
-		id: c.id,
-		name: c.name,
-		description: c.description ?? "",
+	const skillIds = Array.from(new Set(configs.flatMap((c) => c.skills)))
+	const skills: AgentCardSkill[] = skillIds.map((id) => ({
+		id,
+		...(SKILL_METADATA[id] ?? { name: id, description: "" }),
 	}))
 
 	return {
@@ -129,6 +163,37 @@ export async function buildAgentCard(pool: Pool): Promise<AgentCard> {
 		},
 		skills,
 		authentication: { schemes: ["bearer"] },
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Skill routing
+// ---------------------------------------------------------------------------
+
+interface ResolvedAgentConfig {
+	id: string
+	provider: string
+	model: string
+	systemPrompt: string | null
+	toolsEnabled: string[]
+}
+
+/**
+ * Resolve a skill ID (e.g. "coding") to the first agent config that
+ * advertises that skill. Returns the full config so callers can pass it
+ * directly to createSession without a second DB fetch.
+ * Returns undefined when no match — session falls back to the default agent.
+ */
+async function resolveConfig(pool: Pool, skillId: string): Promise<ResolvedAgentConfig | undefined> {
+	const configs = await agentConfigQueries.listAgentConfigs(pool)
+	const match = configs.find((c) => c.skills.includes(skillId))
+	if (!match) return undefined
+	return {
+		id: match.id,
+		provider: match.provider,
+		model: match.model,
+		systemPrompt: match.systemPrompt,
+		toolsEnabled: match.toolsEnabled,
 	}
 }
 
@@ -151,8 +216,8 @@ function rpcErr(id: string | number | null, code: number, message: string, data?
 function taskView(task: TaskState) {
 	return {
 		id: task.id,
-		// parentTaskId is included for caller visibility / debugging.
-		// To hide delegated sub-tasks from A2A callers later, remove this line.
+		// parentTaskId included for debugging visibility.
+		// Remove this line to hide delegated sub-tasks from A2A callers.
 		...(task.parentTaskId !== undefined ? { parentTaskId: task.parentTaskId } : {}),
 		status: { state: task.status },
 		messages: task.messages,
@@ -165,15 +230,9 @@ function extractId(params: unknown): string | null {
 	return typeof id === "string" ? id : null
 }
 
-function extractAgentConfigId(params: unknown): string | undefined {
+function extractSkillId(params: unknown): string | undefined {
 	if (typeof params !== "object" || params === null) return undefined
-	const v = (params as Record<string, unknown>)["agentConfigId"]
-	return typeof v === "string" ? v : undefined
-}
-
-function extractParentTaskId(params: unknown): string | undefined {
-	if (typeof params !== "object" || params === null) return undefined
-	const v = (params as Record<string, unknown>)["parentTaskId"]
+	const v = (params as Record<string, unknown>)["skillId"]
 	return typeof v === "string" ? v : undefined
 }
 
@@ -201,7 +260,6 @@ function getOrCreateTask(
 	taskId: string,
 	userText: string,
 	agentConfigId: string | undefined,
-	parentTaskId?: string,
 ): TaskState {
 	const existing = tasks.get(taskId)
 	if (existing) return existing
@@ -209,7 +267,6 @@ function getOrCreateTask(
 		id: taskId,
 		sessionId: taskId,
 		agentConfigId,
-		...(parentTaskId !== undefined ? { parentTaskId } : {}),
 		status: "submitted",
 		messages: [{ role: "user", parts: [{ type: "text", text: userText }] }],
 	}
@@ -223,6 +280,7 @@ function getOrCreateTask(
 
 async function handleTasksSend(
 	tasks: Map<string, TaskState>,
+	pool: Pool,
 	rpcId: string | number | null,
 	params: unknown,
 	sessionManager: SessionManager,
@@ -234,17 +292,18 @@ async function handleTasksSend(
 	const userText = extractUserText(params)
 	if (!userText) return c.json(rpcErr(rpcId, RPC_INVALID_PARAMS, "params.message must have at least one text part"))
 
-	const agentConfigId = extractAgentConfigId(params)
-	const parentTaskId = extractParentTaskId(params)
-	const task = getOrCreateTask(tasks, taskId, userText, agentConfigId, parentTaskId)
+	// Resolve skillId -> config in one DB query. The resolved config is passed
+	// directly to createSession so it does not re-fetch by ID.
+	const skillId = extractSkillId(params)
+	const resolved = skillId ? await resolveConfig(pool, skillId) : undefined
+
+	const task = getOrCreateTask(tasks, taskId, userText, resolved?.id)
 	task.status = "working"
 
 	const abort = new AbortController()
 	task.abort = abort
 
-	// Ensure session exists and is bound to the right agent config.
-	// createSession fetches the AgentConfig from DB when agentConfigId is set.
-	await sessionManager.createSession(task.sessionId, task.agentConfigId)
+	await sessionManager.createSession(task.sessionId, task.agentConfigId, resolved)
 
 	let assistantText = ""
 
@@ -273,6 +332,7 @@ async function handleTasksSend(
 
 async function handleTasksSendSubscribe(
 	tasks: Map<string, TaskState>,
+	pool: Pool,
 	rpcId: string | number | null,
 	params: unknown,
 	sessionManager: SessionManager,
@@ -284,15 +344,16 @@ async function handleTasksSendSubscribe(
 	const userText = extractUserText(params)
 	if (!userText) return c.json(rpcErr(rpcId, RPC_INVALID_PARAMS, "params.message must have at least one text part"))
 
-	const agentConfigId = extractAgentConfigId(params)
-	const parentTaskId = extractParentTaskId(params)
-	const task = getOrCreateTask(tasks, taskId, userText, agentConfigId, parentTaskId)
+	const skillId = extractSkillId(params)
+	const resolved = skillId ? await resolveConfig(pool, skillId) : undefined
+
+	const task = getOrCreateTask(tasks, taskId, userText, resolved?.id)
 	task.status = "working"
 
 	const abort = new AbortController()
 	task.abort = abort
 
-	await sessionManager.createSession(task.sessionId, task.agentConfigId)
+	await sessionManager.createSession(task.sessionId, task.agentConfigId, resolved)
 
 	return streamSSE(c, async (stream) => {
 		stream.onAbort(() => abort.abort())
@@ -340,7 +401,12 @@ async function handleTasksSendSubscribe(
 // Method: tasks/get
 // ---------------------------------------------------------------------------
 
-function handleTasksGet(tasks: Map<string, TaskState>, rpcId: string | number | null, params: unknown, c: Context): Response {
+function handleTasksGet(
+	tasks: Map<string, TaskState>,
+	rpcId: string | number | null,
+	params: unknown,
+	c: Context,
+): Response {
 	const taskId = extractId(params)
 	if (!taskId) return c.json(rpcErr(rpcId, RPC_INVALID_PARAMS, "params.id is required"))
 
@@ -354,7 +420,12 @@ function handleTasksGet(tasks: Map<string, TaskState>, rpcId: string | number | 
 // Method: tasks/cancel
 // ---------------------------------------------------------------------------
 
-function handleTasksCancel(tasks: Map<string, TaskState>, rpcId: string | number | null, params: unknown, c: Context): Response {
+function handleTasksCancel(
+	tasks: Map<string, TaskState>,
+	rpcId: string | number | null,
+	params: unknown,
+	c: Context,
+): Response {
 	const taskId = extractId(params)
 	if (!taskId) return c.json(rpcErr(rpcId, RPC_INVALID_PARAMS, "params.id is required"))
 
@@ -372,7 +443,12 @@ function handleTasksCancel(tasks: Map<string, TaskState>, rpcId: string | number
 // Method: tasks/pushNotification/set
 // ---------------------------------------------------------------------------
 
-function handlePushNotificationSet(tasks: Map<string, TaskState>, rpcId: string | number | null, params: unknown, c: Context): Response {
+function handlePushNotificationSet(
+	tasks: Map<string, TaskState>,
+	rpcId: string | number | null,
+	params: unknown,
+	c: Context,
+): Response {
 	const taskId = extractId(params)
 	if (!taskId) return c.json(rpcErr(rpcId, RPC_INVALID_PARAMS, "params.id is required"))
 
@@ -421,17 +497,36 @@ export function createA2ARouter(sessionManager: SessionManager, pool: Pool): Hon
 	// Task registry scoped to this router instance — no module-level state.
 	const tasks = new Map<string, TaskState>()
 
-	// Delegation hook — future agent tool for spawning sub-tasks:
+	// ---------------------------------------------------------------------------
+	// Delegation stub
 	//
-	//   async function spawnSubTask(parentTaskId: string, agentConfigId: string, message: string): Promise<TaskState>
+	// When an orchestrating agent needs a capability it doesn't have, it spawns
+	// a new task targeting a different skill rather than switching agents mid-task
+	// (A2A has no mid-task rerouting). The spawned task gets parentTaskId set so
+	// it is traceable by the caller.
 	//
-	// The spawned task is created with `parentTaskId` set so it appears in
-	// taskView. To hide sub-tasks from A2A callers later, remove parentTaskId
-	// from taskView() without touching this spawn path.
+	// Future implementation:
+	//
+	//   async function spawnSubTask(
+	//     parentTaskId: string,
+	//     skillId: string,
+	//     message: string,
+	//   ): Promise<TaskState> {
+	//     const resolved = await resolveConfig(pool, skillId)
+	//     const childId = randomUUID()
+	//     const task = getOrCreateTask(tasks, childId, message, resolved?.id)
+	//     task.parentTaskId = parentTaskId
+	//     await sessionManager.createSession(task.sessionId, task.agentConfigId)
+	//     // ... run turn, return task
+	//   }
+	//
+	// To hide sub-tasks from A2A callers once delegation is stable, remove
+	// parentTaskId from taskView() — TaskState itself stays unchanged.
+	// ---------------------------------------------------------------------------
 
 	const router = new Hono()
 
-	// Agent Card — served here too so /a2a and /.well-known/agent.json both work
+	// Agent Card — served under /a2a/agent.json as well as /.well-known/agent.json
 	router.get("/agent.json", async (c) => {
 		const card = await buildAgentCard(pool)
 		return c.json(card)
@@ -463,9 +558,9 @@ export function createA2ARouter(sessionManager: SessionManager, pool: Pool): Hon
 
 		switch (req.method) {
 			case "tasks/send":
-				return handleTasksSend(tasks, rpcId, req.params, sessionManager, c)
+				return handleTasksSend(tasks, pool, rpcId, req.params, sessionManager, c)
 			case "tasks/sendSubscribe":
-				return handleTasksSendSubscribe(tasks, rpcId, req.params, sessionManager, c)
+				return handleTasksSendSubscribe(tasks, pool, rpcId, req.params, sessionManager, c)
 			case "tasks/get":
 				return handleTasksGet(tasks, rpcId, req.params, c)
 			case "tasks/cancel":

@@ -10,7 +10,7 @@ const HOST = process.env.GATEWAY_HOST || "0.0.0.0"
 
 // Pool is optional: when DATABASE_URL / DB_* vars are not set (e.g. bare MVP
 // dev without Postgres) the gateway still starts and A2A routes return empty skills.
-const pool = process.env["DATABASE_URL"] ?? process.env["DB_HOST"] ? createPool() : undefined
+const pool = (process.env["DATABASE_URL"] ?? process.env["DB_HOST"]) ? createPool() : undefined
 
 const sessionManager = new SessionManager(undefined, pool)
 const app = createApp(sessionManager, pool)

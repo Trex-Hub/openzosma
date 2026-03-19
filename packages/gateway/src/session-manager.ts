@@ -25,7 +25,22 @@ export class SessionManager {
 		this.pool = pool
 	}
 
-	async createSession(id?: string, agentConfigId?: string): Promise<Session> {
+	/**
+	 * Create a new session.
+	 *
+	 * @param id           Optional session ID — if already exists the existing session is returned.
+	 * @param agentConfigId Optional agent config UUID. When provided without `resolvedConfig`,
+	 *                      the config is fetched from the DB. Pass `resolvedConfig` to skip
+	 *                      that fetch when the caller has already loaded the config (avoids
+	 *                      a redundant DB round-trip).
+	 * @param resolvedConfig Pre-fetched agent config fields. When provided, `agentConfigId`
+	 *                       is still stored on the session for reference but no DB query is made.
+	 */
+	async createSession(
+		id?: string,
+		agentConfigId?: string,
+		resolvedConfig?: { provider?: string; model?: string; systemPrompt?: string | null; toolsEnabled?: string[] },
+	): Promise<Session> {
 		// If the caller supplies an ID that already exists, return the existing session.
 		if (id) {
 			const existing = this.sessions.get(id)
@@ -43,10 +58,13 @@ export class SessionManager {
 		const sessionDir = join(workspaceRoot, "sessions", session.id)
 		mkdirSync(sessionDir, { recursive: true })
 
-		// Resolve agent config from DB when an ID is provided and pool is available.
-		// Falls back to env-based defaults (model, system prompt, all tools) when not.
+		// Use pre-resolved config when available to avoid a redundant DB fetch.
+		// Fall back to a DB lookup when only agentConfigId is given, or to
+		// env-based defaults when neither is provided.
 		let agentConfig: { provider?: string; model?: string; systemPrompt?: string | null; toolsEnabled?: string[] } = {}
-		if (agentConfigId && this.pool) {
+		if (resolvedConfig) {
+			agentConfig = resolvedConfig
+		} else if (agentConfigId && this.pool) {
 			const config = await agentConfigQueries.getAgentConfig(this.pool, agentConfigId)
 			if (config) {
 				agentConfig = {
