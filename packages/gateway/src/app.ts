@@ -4,10 +4,12 @@ import { cors } from "hono/cors"
 import { streamSSE } from "hono/streaming"
 import type { Pool } from "@openzosma/db"
 import { agentConfigQueries, apiKeyQueries } from "@openzosma/db"
+import type { Auth } from "@openzosma/auth"
 import type { SessionManager } from "./session-manager.js"
 import { buildAgentCard, createA2ARouter } from "./a2a.js"
+import { createAuthMiddleware } from "./middleware/auth.js"
 
-export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
+export function createApp(sessionManager: SessionManager, pool?: Pool, auth?: Auth): Hono {
 	const app = new Hono()
 
 	app.use(
@@ -38,9 +40,19 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 		})
 	})
 
+	// Better Auth routes (sign-in, sign-up, sign-out, session) — public
+	if (auth) {
+		app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+	}
+
 	// A2A JSON-RPC 2.0 endpoint
 	if (pool) {
 		app.route("/a2a", createA2ARouter(sessionManager, pool))
+	}
+
+	// Auth middleware — protects all /api/v1/* routes
+	if (auth && pool) {
+		app.use("/api/v1/*", createAuthMiddleware(auth, pool))
 	}
 
 	// -----------------------------------------------------------------------
