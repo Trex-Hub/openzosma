@@ -22,7 +22,8 @@
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "^0.60.0",
 		"@mariozechner/pi-ai": "^0.60.0",
-		"@mariozechner/pi-coding-agent": "^0.60.0"
+		"@mariozechner/pi-coding-agent": "^0.60.0",
+		"@sinclair/typebox": "^0.34.48"
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.2",

@@ -291,6 +291,9 @@ importers:
       '@mariozechner/pi-coding-agent':
         specifier: ^0.60.0
         version: 0.60.0(ws@8.19.0)(zod@4.3.6)
+      '@sinclair/typebox':
+        specifier: ^0.34.48
+        version: 0.34.48
     devDependencies:
       '@types/node':
         specifier: ^22.15.2
