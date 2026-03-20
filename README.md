@@ -34,6 +34,8 @@ Open http://localhost:3000, type a message, and see the streaming response.
 
 The MVP gateway uses in-memory sessions and calls OpenAI directly (no database, no auth, no gRPC separation). See [ARCHITECTURE.md](./ARCHITECTURE.md) for details on what is implemented vs. planned.
 
+> **Note:** The gateway `dev` script loads `../../.env` automatically via `--env-file`. If you need a different env file, run `npx tsx --env-file=<path> src/index.ts` from `packages/gateway/`. When `.env` has `DB_HOST` or `DATABASE_URL` set, the gateway connects to PostgreSQL and enables A2A per-agent routes.
+
 ### Full Setup
 
 ```bash

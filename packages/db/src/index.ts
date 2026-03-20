@@ -1,6 +1,7 @@
 // Pool
 export { createPool } from "./pool.js"
 export type { PoolConfig } from "./pool.js"
+export type { Pool } from "pg"
 
 // Types
 export type {

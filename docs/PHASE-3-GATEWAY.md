@@ -19,8 +19,8 @@ The gateway MVP is functional with a reduced scope to get the end-to-end flow wo
 | Health check (`GET /health`) | Done |
 | Auth middleware | Not yet |
 | gRPC client to orchestrator | Not yet (gateway calls OpenAI directly) |
-| A2A protocol | Not yet |
-| SSE endpoint | Not yet |
+| A2A protocol (per-agent cards, `a2a-js` SDK) | Done |
+| SSE endpoint (`tasks/sendSubscribe`) | Done |
 | Valkey pub/sub fan-out | Not yet |
 | Rate limiting | Not yet |
 

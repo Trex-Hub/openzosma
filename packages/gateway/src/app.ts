@@ -1,8 +1,10 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
+import type { Pool } from "@openzosma/db"
 import type { SessionManager } from "./session-manager.js"
+import { buildDefaultAgentCard, createPerAgentRouter } from "./a2a.js"
 
-export function createApp(sessionManager: SessionManager): Hono {
+export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 	const app = new Hono()
 
 	app.use(
@@ -16,9 +18,31 @@ export function createApp(sessionManager: SessionManager): Hono {
 
 	app.get("/health", (c) => c.json({ status: "ok" }))
 
+	// A2A default Agent Card — returns the first agent config's card
+	app.get("/.well-known/agent.json", async (c) => {
+		if (pool) {
+			const card = await buildDefaultAgentCard(pool)
+			if (card) return c.json(card)
+		}
+		return c.json({
+			name: "OpenZosma Agent",
+			description: "Self-hosted AI agent platform",
+			url: `${process.env["PUBLIC_URL"] ?? "http://localhost:4000"}/a2a/agents`,
+			version: "1.0.0",
+			capabilities: { streaming: true, pushNotifications: false, stateTransitionHistory: true },
+			skills: [],
+			authentication: { schemes: ["bearer"] },
+		})
+	})
+
+	// A2A per-agent routes
+	if (pool) {
+		app.route("/a2a", createPerAgentRouter(sessionManager, pool))
+	}
+
 	// Create a new session
-	app.post("/api/v1/sessions", (c) => {
-		const session = sessionManager.createSession()
+	app.post("/api/v1/sessions", async (c) => {
+		const session = await sessionManager.createSession()
 		return c.json({ id: session.id, createdAt: session.createdAt }, 201)
 	})
 

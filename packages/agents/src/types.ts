@@ -49,6 +49,26 @@ export interface AgentMessage {
 export interface AgentSessionOpts {
 	sessionId: string
 	workspaceDir: string
+	/**
+	 * LLM provider name (e.g. "anthropic", "openai").
+	 * When omitted, resolved from environment variables.
+	 */
+	provider?: string
+	/**
+	 * Model ID within the provider (e.g. "claude-sonnet-4-20250514").
+	 * When omitted, the provider default is used.
+	 */
+	model?: string
+	/**
+	 * System prompt override. When omitted, the built-in default is used.
+	 */
+	systemPrompt?: string
+	/**
+	 * Subset of tool names to enable (e.g. ["read", "bash", "write"]).
+	 * Valid names: read, bash, edit, write, grep, find, ls.
+	 * When omitted or empty, all tools are enabled.
+	 */
+	toolsEnabled?: string[]
 }
 
 /** A single agent session that can exchange messages. */

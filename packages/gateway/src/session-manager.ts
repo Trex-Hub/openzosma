@@ -3,6 +3,8 @@ import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { AgentProvider, AgentSession } from "@openzosma/agents"
 import { PiAgentProvider } from "@openzosma/agents"
+import type { Pool } from "@openzosma/db"
+import { agentConfigQueries } from "@openzosma/db"
 import type { GatewayEvent, Session, SessionMessage } from "./types.js"
 
 /**
@@ -16,12 +18,29 @@ interface SessionState {
 export class SessionManager {
 	private sessions = new Map<string, SessionState>()
 	private provider: AgentProvider
+	private pool: Pool | undefined
 
-	constructor(provider?: AgentProvider) {
+	constructor(provider?: AgentProvider, pool?: Pool) {
 		this.provider = provider ?? new PiAgentProvider()
+		this.pool = pool
 	}
 
-	createSession(id?: string): Session {
+	/**
+	 * Create a new session.
+	 *
+	 * @param id           Optional session ID — if already exists the existing session is returned.
+	 * @param agentConfigId Optional agent config UUID. When provided without `resolvedConfig`,
+	 *                      the config is fetched from the DB. Pass `resolvedConfig` to skip
+	 *                      that fetch when the caller has already loaded the config (avoids
+	 *                      a redundant DB round-trip).
+	 * @param resolvedConfig Pre-fetched agent config fields. When provided, `agentConfigId`
+	 *                       is still stored on the session for reference but no DB query is made.
+	 */
+	async createSession(
+		id?: string,
+		agentConfigId?: string,
+		resolvedConfig?: { provider?: string; model?: string; systemPrompt?: string | null; toolsEnabled?: string[] },
+	): Promise<Session> {
 		// If the caller supplies an ID that already exists, return the existing session.
 		if (id) {
 			const existing = this.sessions.get(id)
@@ -30,6 +49,7 @@ export class SessionManager {
 
 		const session: Session = {
 			id: id ?? randomUUID(),
+			agentConfigId,
 			createdAt: new Date().toISOString(),
 			messages: [],
 		}
@@ -38,9 +58,28 @@ export class SessionManager {
 		const sessionDir = join(workspaceRoot, "sessions", session.id)
 		mkdirSync(sessionDir, { recursive: true })
 
+		// Use pre-resolved config when available to avoid a redundant DB fetch.
+		// Fall back to a DB lookup when only agentConfigId is given, or to
+		// env-based defaults when neither is provided.
+		let agentConfig: { provider?: string; model?: string; systemPrompt?: string | null; toolsEnabled?: string[] } = {}
+		if (resolvedConfig) {
+			agentConfig = resolvedConfig
+		} else if (agentConfigId && this.pool) {
+			const config = await agentConfigQueries.getAgentConfig(this.pool, agentConfigId)
+			if (config) {
+				agentConfig = {
+					provider: config.provider,
+					model: config.model,
+					systemPrompt: config.systemPrompt ?? undefined,
+					toolsEnabled: config.toolsEnabled,
+				}
+			}
+		}
+
 		const agentSession = this.provider.createSession({
 			sessionId: session.id,
 			workspaceDir: sessionDir,
+			...agentConfig,
 		})
 
 		this.sessions.set(session.id, { agentSession, session })
@@ -61,7 +100,7 @@ export class SessionManager {
 		// Auto-create session on first message if it doesn't exist yet.
 		// This allows the web app to use its own conversation IDs directly.
 		if (!this.sessions.has(sessionId)) {
-			this.createSession(sessionId)
+			await this.createSession(sessionId)
 		}
 
 		const state = this.sessions.get(sessionId)

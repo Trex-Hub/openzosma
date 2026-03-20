@@ -29,12 +29,13 @@ const DEFAULT_MODELS: Record<string, string> = {
 
 /**
  * Resolve the model to use. Priority:
- * 1. Explicit OPENZOSMA_MODEL_PROVIDER + OPENZOSMA_MODEL_ID env vars
- * 2. Auto-detect from available API keys using PROVIDER_PREFERENCE order
+ * 1. Caller-supplied provider/modelId (from agent config)
+ * 2. Explicit OPENZOSMA_MODEL_PROVIDER + OPENZOSMA_MODEL_ID env vars
+ * 3. Auto-detect from available API keys using PROVIDER_PREFERENCE order
  */
-function resolveModel(): { model: Model<Api>; apiKey: string } {
-	const explicitProvider = process.env.OPENZOSMA_MODEL_PROVIDER
-	const explicitModelId = process.env.OPENZOSMA_MODEL_ID
+function resolveModel(providerOverride?: string, modelIdOverride?: string): { model: Model<Api>; apiKey: string } {
+	const explicitProvider = providerOverride ?? process.env.OPENZOSMA_MODEL_PROVIDER
+	const explicitModelId = modelIdOverride ?? process.env.OPENZOSMA_MODEL_ID
 
 	// Explicit configuration
 	if (explicitProvider) {
@@ -96,7 +97,7 @@ class PiAgentSession implements AgentSession {
 	private messages: AgentMessage[] = []
 
 	constructor(opts: AgentSessionOpts) {
-		const toolList = [
+		const allTools = [
 			createReadTool(opts.workspaceDir),
 			createBashTool(opts.workspaceDir),
 			createEditTool(opts.workspaceDir),
@@ -106,11 +107,17 @@ class PiAgentSession implements AgentSession {
 			createLsTool(opts.workspaceDir),
 		]
 
-		const { model } = resolveModel()
+		// Filter to caller-specified tools; if none specified, enable all.
+		const toolList =
+			opts.toolsEnabled && opts.toolsEnabled.length > 0
+				? allTools.filter((t) => opts.toolsEnabled!.includes(t.name))
+				: allTools
+
+		const { model } = resolveModel(opts.provider, opts.model)
 
 		this.agent = new Agent({
 			initialState: {
-				systemPrompt: DEFAULT_SYSTEM_PROMPT,
+				systemPrompt: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
 				model,
 				thinkingLevel: "off",
 				tools: toolList,

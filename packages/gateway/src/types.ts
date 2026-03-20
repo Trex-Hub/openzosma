@@ -49,6 +49,8 @@ export type WsServerMessage = GatewayEvent | { type: "pong" }
 /** In-memory representation of a session. */
 export interface Session {
 	id: string
+	/** Agent config this session was started with, if specified. */
+	agentConfigId?: string
 	createdAt: string
 	messages: SessionMessage[]
 }
