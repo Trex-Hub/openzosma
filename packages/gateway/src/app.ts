@@ -1,8 +1,12 @@
+import { randomBytes, createHash } from "node:crypto"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
+import { streamSSE } from "hono/streaming"
 import type { Pool } from "@openzosma/db"
+import { agentConfigQueries, apiKeyQueries } from "@openzosma/db"
 import type { SessionManager } from "./session-manager.js"
-import { buildDefaultAgentCard, createPerAgentRouter } from "./a2a.js"
+import { buildDefaultAgentCard } from "@openzosma/a2a"
+import { createPerAgentRouter } from "./a2a.js"
 
 export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 	const app = new Hono()
@@ -11,8 +15,8 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 		"*",
 		cors({
 			origin: ["http://localhost:3000"],
-			allowMethods: ["GET", "POST", "OPTIONS"],
-			allowHeaders: ["Content-Type"],
+			allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+			allowHeaders: ["Content-Type", "Authorization"],
 		}),
 	)
 
@@ -40,13 +44,15 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 		app.route("/a2a", createPerAgentRouter(sessionManager, pool))
 	}
 
-	// Create a new session
+	// -----------------------------------------------------------------------
+	// Session routes
+	// -----------------------------------------------------------------------
+
 	app.post("/api/v1/sessions", async (c) => {
 		const session = await sessionManager.createSession()
 		return c.json({ id: session.id, createdAt: session.createdAt }, 201)
 	})
 
-	// Get session details
 	app.get("/api/v1/sessions/:id", (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
@@ -59,7 +65,14 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 		})
 	})
 
-	// Send a message (non-streaming REST fallback)
+	app.delete("/api/v1/sessions/:id", (c) => {
+		const deleted = sessionManager.deleteSession(c.req.param("id"))
+		if (!deleted) {
+			return c.json({ error: "Session not found" }, 404)
+		}
+		return c.json({ ok: true })
+	})
+
 	app.post("/api/v1/sessions/:id/messages", async (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
@@ -76,7 +89,6 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 			events.push(event)
 		}
 
-		// Collect full response text from message_update events
 		const text = events
 			.filter((e) => e.type === "message_update" && e.text)
 			.map((e) => e.text)
@@ -85,7 +97,6 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 		return c.json({ role: "assistant", content: text })
 	})
 
-	// Get messages for a session
 	app.get("/api/v1/sessions/:id/messages", (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
@@ -93,6 +104,94 @@ export function createApp(sessionManager: SessionManager, pool?: Pool): Hono {
 		}
 		return c.json(session.messages)
 	})
+
+	// SSE stream — subscribe to real-time events for a session.
+	// Will switch to Valkey pub/sub when the orchestrator is in place.
+	app.get("/api/v1/sessions/:id/stream", (c) => {
+		const session = sessionManager.getSession(c.req.param("id"))
+		if (!session) {
+			return c.json({ error: "Session not found" }, 404)
+		}
+
+		return streamSSE(c, async (stream) => {
+			const abort = new AbortController()
+			stream.onAbort(() => abort.abort())
+
+			for await (const event of sessionManager.subscribe(c.req.param("id"), abort.signal)) {
+				await stream.writeSSE({ data: JSON.stringify(event) })
+			}
+		})
+	})
+
+	// -----------------------------------------------------------------------
+	// Agent config routes (require DB pool)
+	// -----------------------------------------------------------------------
+
+	if (pool) {
+		app.get("/api/v1/agents", async (c) => {
+			const agents = await agentConfigQueries.listAgentConfigs(pool)
+			return c.json({
+				agents: agents.map((a) => ({
+					id: a.id,
+					name: a.name,
+					description: a.description,
+					model: a.model,
+					provider: a.provider,
+					skills: a.skills,
+					createdAt: a.createdAt,
+				})),
+			})
+		})
+
+		app.get("/api/v1/agents/:id", async (c) => {
+			const agent = await agentConfigQueries.getAgentConfig(pool, c.req.param("id"))
+			if (!agent) {
+				return c.json({ error: "Agent config not found" }, 404)
+			}
+			return c.json(agent)
+		})
+	}
+
+	// -----------------------------------------------------------------------
+	// API key routes (require DB pool)
+	// -----------------------------------------------------------------------
+
+	if (pool) {
+		app.post("/api/v1/api-keys", async (c) => {
+			const body = await c.req.json<{ name: string; scopes?: string[]; expiresAt?: string }>()
+			if (!body.name) {
+				return c.json({ error: "name is required" }, 400)
+			}
+
+			const rawKey = `ozk_${randomBytes(32).toString("base64url")}`
+			const keyPrefix = rawKey.slice(0, 12)
+			const keyHash = createHash("sha256").update(rawKey).digest("hex")
+			const expiresAt = body.expiresAt ? new Date(body.expiresAt) : undefined
+
+			const apiKey = await apiKeyQueries.createApiKey(pool, body.name, keyHash, keyPrefix, body.scopes, expiresAt)
+			return c.json({ id: apiKey.id, key: rawKey }, 201)
+		})
+
+		app.get("/api/v1/api-keys", async (c) => {
+			const keys = await apiKeyQueries.listApiKeys(pool)
+			return c.json({
+				keys: keys.map((k) => ({
+					id: k.id,
+					name: k.name,
+					keyPrefix: k.keyPrefix,
+					scopes: k.scopes,
+					lastUsedAt: k.lastUsedAt,
+					expiresAt: k.expiresAt,
+					createdAt: k.createdAt,
+				})),
+			})
+		})
+
+		app.delete("/api/v1/api-keys/:id", async (c) => {
+			await apiKeyQueries.deleteApiKey(pool, c.req.param("id"))
+			return c.json({ ok: true })
+		})
+	}
 
 	return app
 }
