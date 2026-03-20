@@ -1,14 +1,19 @@
 import { serve } from "@hono/node-server"
+import { createPool } from "@openzosma/db"
 import { WebSocketServer } from "ws"
 import { createApp } from "./app.js"
+import { seedBuiltinSkills } from "./seeds/builtin-skills.js"
 import { SessionManager } from "./session-manager.js"
 import { handleWebSocket } from "./ws.js"
 
 const PORT = Number(process.env.GATEWAY_PORT) || 4000
 const HOST = process.env.GATEWAY_HOST || "0.0.0.0"
 
-const sessionManager = new SessionManager()
-const app = createApp(sessionManager)
+const db = createPool()
+await seedBuiltinSkills(db)
+
+const sessionManager = new SessionManager(undefined, db)
+const app = createApp(sessionManager, db)
 
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
 	console.log(`Gateway listening on ${HOST}:${PORT}`)

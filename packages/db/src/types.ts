@@ -1,18 +1,53 @@
+// -- Agent Types --
+
+export interface AgentType {
+	id: string
+	name: string
+	description: string | null
+	configSchema: unknown | null
+	isAvailable: boolean
+	createdAt: Date
+}
+
 // -- Agent Configs --
 
 export interface AgentConfig {
 	id: string
+	organizationId: string | null
+	agentTypeId: string
 	name: string
 	description: string | null
-	model: string
-	provider: string
 	systemPrompt: string | null
-	toolsEnabled: string[]
-	skills: string[]
-	maxTokens: number
-	temperature: number
+	config: Record<string, unknown>
+	isDefault: boolean
 	createdAt: Date
 	updatedAt: Date
+}
+
+// -- Agent Skills --
+
+export interface AgentSkill {
+	id: string
+	name: string
+	description: string | null
+	content: string
+	isBuiltin: boolean
+	enabled: boolean
+	sortOrder: number
+	createdAt: Date
+	updatedAt: Date
+}
+
+export interface AgentConfigSkill {
+	agentConfigId: string
+	skillId: string
+	enabled: boolean
+	sortOrder: number
+}
+
+export interface ResolvedSkill {
+	name: string
+	content: string
 }
 
 // -- API Keys --

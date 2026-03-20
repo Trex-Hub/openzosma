@@ -24,6 +24,7 @@ const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 	const [conversations, setConversations] = useState<ConversationSummary[]>([])
 	const [loading, setLoading] = useState(true)
 	const [search, setSearch] = useState("")
+	const [defaultConfigId, setDefaultConfigId] = useState<string | null>(null)
 
 	const activeconversationid = pathname.split("/chat/")[1] || null
 
@@ -42,6 +43,11 @@ const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 
 	useEffect(() => {
 		fetchconversations()
+		// Load default agent config ID once on mount
+		fetch("/api/agent-configs/default")
+			.then((r) => (r.ok ? r.json() : null))
+			.then((d) => setDefaultConfigId(d?.id ?? null))
+			.catch(() => {})
 	}, [fetchconversations])
 
 	const handlenewchat = async () => {
@@ -51,8 +57,7 @@ const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					title: "New Conversation",
-					agentid: "dbchatagent",
-					agentname: "DB Chat Agent",
+					agentConfigId: defaultConfigId,
 				}),
 			})
 			if (res.ok) {

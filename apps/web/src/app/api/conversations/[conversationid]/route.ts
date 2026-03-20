@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ con
 
 	// Get conversation
 	const convresult = await pool.query(
-		`SELECT id, title, createdby, createdat, updatedat
+		`SELECT id, title, createdby, createdat, updatedat, agent_config_id
      FROM public.conversations
      WHERE id = $1 AND deletedat IS NULL`,
 		[conversationid],

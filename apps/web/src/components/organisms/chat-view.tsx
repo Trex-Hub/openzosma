@@ -76,6 +76,7 @@ type ConversationData = {
 	createdby: string
 	createdat: string
 	updatedat: string
+	agent_config_id: string | null
 }
 
 type StreamToolCall = {
@@ -337,13 +338,11 @@ const ChatView = () => {
 		// Save user message to DB
 		await savemessage("human", userid, message.text)
 
-		// Find agent participant
+		// Agent participant row (new conversations should include one from POST /api/conversations).
+		// Older threads may lack it; still stream using conversation.agent_config_id for the gateway.
 		const agentparticipant = participants.find((p) => p.participanttype === "agent")
-
-		if (!agentparticipant) {
-			fetchconversation()
-			return
-		}
+		const agentsenderid =
+			agentparticipant?.participantid ?? conversation?.agent_config_id ?? "openzosma-agent"
 
 		// Stream response from gateway via WebSocket
 		setStreaming(true)
@@ -371,6 +370,7 @@ const ChatView = () => {
 							type: "message",
 							sessionId: conversationid,
 							content: message.text,
+							agentConfigId: conversation?.agent_config_id ?? undefined,
 						}),
 					)
 				}
@@ -483,7 +483,7 @@ const ChatView = () => {
 				}
 			})
 
-			await savemessage("agent", agentparticipant.participantid, fullcontent)
+			await savemessage("agent", agentsenderid, fullcontent)
 			fetchconversation()
 		} catch (err) {
 			console.error("Failed to stream from agent:", err)

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
-import type { AgentProvider, AgentSession } from "@openzosma/agents"
+import type { AgentProvider, AgentSession, AgentSessionOpts } from "@openzosma/agents"
 import { PiAgentProvider } from "@openzosma/agents"
+import { agentConfigQueries, agentSkillQueries } from "@openzosma/db"
+import type pg from "pg"
 import type { GatewayEvent, Session, SessionMessage } from "./types.js"
 
 /**
@@ -17,11 +19,24 @@ export class SessionManager {
 	private sessions = new Map<string, SessionState>()
 	private provider: AgentProvider
 
-	constructor(provider?: AgentProvider) {
+	constructor(
+		provider?: AgentProvider,
+		private db?: pg.Pool,
+	) {
 		this.provider = provider ?? new PiAgentProvider()
 	}
 
-	createSession(id?: string): Session {
+	/**
+	 * Ensure a session exists, creating it with the given agentConfigId if not.
+	 * Used by the WS handler before streaming to guarantee the session is ready.
+	 */
+	async ensureSession(id: string, agentConfigId?: string): Promise<Session> {
+		const existing = this.sessions.get(id)
+		if (existing) return existing.session
+		return this.createSession(id, agentConfigId)
+	}
+
+	async createSession(id?: string, agentConfigId?: string): Promise<Session> {
 		// If the caller supplies an ID that already exists, return the existing session.
 		if (id) {
 			const existing = this.sessions.get(id)
@@ -38,11 +53,29 @@ export class SessionManager {
 		const sessionDir = join(workspaceRoot, "sessions", session.id)
 		mkdirSync(sessionDir, { recursive: true })
 
-		const agentSession = this.provider.createSession({
-			sessionId: session.id,
-			workspaceDir: sessionDir,
-		})
+		let agentOpts: AgentSessionOpts = { sessionId: session.id, workspaceDir: sessionDir }
 
+		if (agentConfigId && this.db) {
+			const config = await agentConfigQueries.getAgentConfig(this.db, agentConfigId)
+			if (config) {
+				const skills = await agentSkillQueries.getSkillsForConfig(this.db, agentConfigId)
+				const piCfg = config.config as Record<string, unknown>
+				agentOpts = {
+					...agentOpts,
+					provider: typeof piCfg.provider === "string" ? piCfg.provider : undefined,
+					model: typeof piCfg.model === "string" ? piCfg.model : undefined,
+					toolsEnabled: Array.isArray(piCfg.tools_enabled) ? (piCfg.tools_enabled as string[]) : undefined,
+					thinkingLevel:
+						typeof piCfg.thinking_level === "string"
+							? (piCfg.thinking_level as AgentSessionOpts["thinkingLevel"])
+							: undefined,
+					systemPrompt: config.systemPrompt ?? undefined,
+					skills,
+				}
+			}
+		}
+
+		const agentSession = this.provider.createSession(agentOpts)
 		this.sessions.set(session.id, { agentSession, session })
 		return session
 	}
@@ -58,10 +91,9 @@ export class SessionManager {
 	 * AgentStreamEvents to GatewayEvents.
 	 */
 	async *sendMessage(sessionId: string, content: string, signal?: AbortSignal): AsyncGenerator<GatewayEvent> {
-		// Auto-create session on first message if it doesn't exist yet.
-		// This allows the web app to use its own conversation IDs directly.
+		// Session should already be ensured by the WS handler; create a bare fallback if not.
 		if (!this.sessions.has(sessionId)) {
-			this.createSession(sessionId)
+			await this.createSession(sessionId)
 		}
 
 		const state = this.sessions.get(sessionId)

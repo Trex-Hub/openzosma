@@ -4,7 +4,8 @@ import { getEnvApiKey } from "@mariozechner/pi-ai"
 import { convertToLlm } from "@mariozechner/pi-coding-agent"
 import { DEFAULT_SYSTEM_PROMPT } from "./pi/config.js"
 import { resolveModel } from "./pi/model.js"
-import { createDefaultTools } from "./pi/tools.js"
+import { formatSkillsForPrompt } from "./pi/skills.js"
+import { buildToolList } from "./pi/tools.js"
 import type { AgentMessage, AgentProvider, AgentSession, AgentSessionOpts, AgentStreamEvent } from "./types.js"
 
 class PiAgentSession implements AgentSession {
@@ -12,15 +13,16 @@ class PiAgentSession implements AgentSession {
 	private messages: AgentMessage[] = []
 
 	constructor(opts: AgentSessionOpts) {
-		const toolList = [...createDefaultTools(opts.workspaceDir)]
-
-		const { model } = resolveModel()
+		const { model } = resolveModel(opts.provider, opts.model)
+		const toolList = buildToolList(opts.workspaceDir, opts.toolsEnabled)
+		const basePrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT
+		const fullPrompt = opts.skills?.length ? basePrompt + formatSkillsForPrompt(opts.skills) : basePrompt
 
 		this.agent = new Agent({
 			initialState: {
-				systemPrompt: DEFAULT_SYSTEM_PROMPT,
+				systemPrompt: fullPrompt,
 				model,
-				thinkingLevel: "off",
+				thinkingLevel: opts.thinkingLevel ?? "off",
 				tools: toolList,
 			},
 			convertToLlm,

@@ -45,10 +45,24 @@ export interface AgentMessage {
 	createdAt: string
 }
 
+/** A skill definition to inject into the agent's system prompt. */
+export interface SkillDefinition {
+	name: string
+	content: string
+}
+
 /** Options for creating an agent session. */
 export interface AgentSessionOpts {
 	sessionId: string
 	workspaceDir: string
+	// All optional — fall back to env/hardcoded defaults when absent
+	model?: string
+	provider?: string
+	systemPrompt?: string
+	toolsEnabled?: string[]
+	skills?: SkillDefinition[]
+	thinkingLevel?: "off" | "low" | "medium" | "high"
+	maxTokens?: number
 }
 
 /** A single agent session that can exchange messages. */

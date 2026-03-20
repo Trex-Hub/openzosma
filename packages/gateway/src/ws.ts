@@ -45,7 +45,15 @@ export function handleWebSocket(ws: WebSocket, sessionManager: SessionManager): 
 			const controller = new AbortController()
 			activeTurns.set(msg.sessionId, controller)
 
-			void streamResponse(ws, sessionManager, msg.sessionId, msg.content, controller)
+			// Ensure the session is created with the correct agent config before streaming
+			void sessionManager
+				.ensureSession(msg.sessionId, msg.agentConfigId)
+				.then(() => streamResponse(ws, sessionManager, msg.sessionId, msg.content, controller))
+				.catch((err: unknown) => {
+					const error = err instanceof Error ? err.message : "Session initialization failed"
+					send(ws, { type: "error", error })
+					activeTurns.delete(msg.sessionId)
+				})
 			return
 		}
 

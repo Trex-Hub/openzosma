@@ -23,6 +23,9 @@ importers:
       '@openzosma/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@openzosma/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@radix-ui/react-accordion':
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -366,9 +369,15 @@ importers:
       '@openzosma/grpc':
         specifier: workspace:*
         version: link:../grpc
+      '@types/pg':
+        specifier: ^8.18.0
+        version: 8.18.0
       hono:
         specifier: ^4.7.6
         version: 4.12.8
+      pg:
+        specifier: ^8.20.0
+        version: 8.20.0
       ws:
         specifier: ^8.18.1
         version: 8.19.0

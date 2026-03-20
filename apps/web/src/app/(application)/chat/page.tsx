@@ -91,6 +91,7 @@ const ChatPage = () => {
 	const router = useRouter()
 	const textarearef = useRef<HTMLTextAreaElement>(null)
 	const [tipindex, setTipindex] = useState(0)
+	const [defaultConfigId, setDefaultConfigId] = useState<string | null>(null)
 
 	// Rotate tips every 4 seconds
 	useEffect(() => {
@@ -98,6 +99,13 @@ const ChatPage = () => {
 			setTipindex((prev) => (prev + 1) % ROTATING_TIPS.length)
 		}, 4000)
 		return () => clearInterval(interval)
+	}, [])
+
+	useEffect(() => {
+		fetch("/api/agent-configs/default")
+			.then((r) => (r.ok ? r.json() : null))
+			.then((d: { id: string } | null) => setDefaultConfigId(d?.id ?? null))
+			.catch(() => {})
 	}, [])
 
 	const handlesubmit = async (message: PromptInputMessage) => {
@@ -109,8 +117,7 @@ const ChatPage = () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					title: message.text.slice(0, 80) || "New Conversation",
-					agentid: "dbchatagent",
-					agentname: "DB Chat Agent",
+					agentConfigId: defaultConfigId,
 				}),
 			})
 

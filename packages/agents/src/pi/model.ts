@@ -4,12 +4,30 @@ import { DEFAULT_MODELS, PROVIDER_PREFERENCE } from "./config.js"
 
 /**
  * Resolve the model to use. Priority:
- * 1. Explicit OPENZOSMA_MODEL_PROVIDER + OPENZOSMA_MODEL_ID env vars
- * 2. Auto-detect from available API keys using PROVIDER_PREFERENCE order
+ * 1. providerOverride + modelOverride arguments (from agent config)
+ * 2. Explicit OPENZOSMA_MODEL_PROVIDER + OPENZOSMA_MODEL_ID env vars
+ * 3. Auto-detect from available API keys using PROVIDER_PREFERENCE order
  */
-export function resolveModel(): { model: Model<Api>; apiKey: string } {
-	const explicitProvider = process.env.OPENZOSMA_MODEL_PROVIDER
-	const explicitModelId = process.env.OPENZOSMA_MODEL_ID
+export function resolveModel(
+	providerOverride?: string,
+	modelOverride?: string,
+): { model: Model<Api>; apiKey: string } {
+	if (providerOverride && modelOverride) {
+		const model = getModel(providerOverride as "anthropic", modelOverride as "claude-sonnet-4-20250514")
+		if (!model) {
+			throw new Error(`Model ${providerOverride}/${modelOverride} not found in model registry.`)
+		}
+		const apiKey = getEnvApiKey(providerOverride)
+		if (!apiKey) {
+			throw new Error(
+				`No API key found for provider "${providerOverride}". Set the appropriate environment variable.`,
+			)
+		}
+		return { model, apiKey }
+	}
+
+	const explicitProvider = providerOverride ?? process.env.OPENZOSMA_MODEL_PROVIDER
+	const explicitModelId = modelOverride ?? process.env.OPENZOSMA_MODEL_ID
 
 	if (explicitProvider) {
 		const modelId = explicitModelId ?? DEFAULT_MODELS[explicitProvider]
