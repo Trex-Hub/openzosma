@@ -136,15 +136,42 @@ export type WebPreviewBodyProps = ComponentProps<"iframe"> & {
 	loading?: ReactNode
 }
 
+// Sanitize user-controlled URLs before using them as iframe sources.
+const sanitizeUrl = (rawUrl: string): string | undefined => {
+	if (!rawUrl) {
+		return undefined
+	}
+
+	let urlToParse = rawUrl.trim()
+
+	// If the user did not include a scheme, default to https.
+	if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(urlToParse)) {
+		urlToParse = `https://${urlToParse}`
+	}
+
+	try {
+		const parsed = new URL(urlToParse)
+		if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+			return parsed.toString()
+		}
+	} catch {
+		// Invalid URL; fall through to undefined.
+	}
+
+	return undefined
+}
+
 export const WebPreviewBody = ({ className, loading, src, ...props }: WebPreviewBodyProps) => {
 	const { url } = useWebPreview()
+
+	const safeSrc = src ?? sanitizeUrl(url)
 
 	return (
 		<div className="flex-1">
 			<iframe
 				className={cn("size-full", className)}
 				sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-				src={(src ?? url) || undefined}
+				src={safeSrc}
 				title="Preview"
 				{...props}
 			/>
