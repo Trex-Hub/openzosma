@@ -36,7 +36,7 @@ export default function RootLayout({
 	children: React.ReactNode
 }>) {
 	return (
-		<html lang="en" className={`${figtree.variable} ${inter.variable} ${antonio.variable}`} suppressHydrationWarning>
+		<html lang="en" className={`${figtree.variable} ${inter.variable} ${antonio.variable}`} suppressHydrationWarning data-scroll-behavior="smooth">
 			<body className="antialiased">
 				<ThemeProvider attribute="class" defaultTheme="light">
 					<QueryProvider>{children}</QueryProvider>

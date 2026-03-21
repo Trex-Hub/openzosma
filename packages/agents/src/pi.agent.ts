@@ -1,36 +1,48 @@
 import { randomUUID } from "node:crypto"
-import { Agent, type AgentEvent as PiAgentEvent } from "@mariozechner/pi-agent-core"
-import { getEnvApiKey } from "@mariozechner/pi-ai"
-import { convertToLlm } from "@mariozechner/pi-coding-agent"
+import type { AgentSession as PiSdkSession } from "@mariozechner/pi-coding-agent"
+import { DefaultResourceLoader, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent"
 import { DEFAULT_SYSTEM_PROMPT } from "./pi/config.js"
+import { bootstrapPiExtensions } from "./pi/extensions/index.js"
 import { resolveModel } from "./pi/model.js"
 import { createDefaultTools } from "./pi/tools.js"
 import type { AgentMessage, AgentProvider, AgentSession, AgentSessionOpts, AgentStreamEvent } from "./types.js"
 
 class PiAgentSession implements AgentSession {
-	private agent: Agent
+	private sessionPromise: Promise<PiSdkSession>
 	private messages: AgentMessage[] = []
 
 	constructor(opts: AgentSessionOpts) {
-		const toolList = [...createDefaultTools(opts.workspaceDir)]
-
+		const toolList = [...createDefaultTools(opts.workspaceDir, opts.toolsEnabled)]
 		const { model } = resolveModel()
+		const { extensionPaths } = bootstrapPiExtensions()
 
-		this.agent = new Agent({
-			initialState: {
-				systemPrompt: DEFAULT_SYSTEM_PROMPT,
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: opts.workspaceDir,
+			additionalExtensionPaths: extensionPaths,
+			systemPrompt: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+		})
+
+		this.sessionPromise = (async () => {
+			await resourceLoader.reload()
+			const { session, extensionsResult } = await createAgentSession({
+				cwd: opts.workspaceDir,
 				model,
 				thinkingLevel: "off",
 				tools: toolList,
-			},
-			convertToLlm,
-			getApiKey: (provider: string) => {
-				return getEnvApiKey(provider)
-			},
-		})
+				sessionManager: SessionManager.inMemory(),
+				resourceLoader,
+			})
+			if (extensionsResult.errors.length > 0) {
+				const extensionErrors = extensionsResult.errors.map((e) => `${e.path}: ${e.error}`).join("; ")
+				console.warn(`[openzosma/agents] extension load errors: ${extensionErrors}`)
+			}
+			return session
+		})()
 	}
 
 	async *sendMessage(content: string, signal?: AbortSignal): AsyncGenerator<AgentStreamEvent> {
+		const session = await this.sessionPromise
+
 		const userMsg: AgentMessage = {
 			id: randomUUID(),
 			role: "user",
@@ -54,7 +66,7 @@ class PiAgentSession implements AgentSession {
 		let fullResponseText = ""
 		let messageId = randomUUID()
 
-		const unsubscribe = this.agent.subscribe((event: PiAgentEvent) => {
+		const unsubscribe = session.subscribe((event) => {
 			switch (event.type) {
 				case "agent_start":
 					enqueue({ type: "turn_start", id: randomUUID() })
@@ -105,7 +117,7 @@ class PiAgentSession implements AgentSession {
 				case "tool_execution_end": {
 					const resultText =
 						event.result?.content
-							?.map((c: { type: string; text?: string }) => (c.type === "text" ? c.text : ""))
+							?.map((c: { type: string; text?: string }) => (c.type === "text" ? (c.text ?? "") : ""))
 							.join("") ?? ""
 					enqueue({
 						type: "tool_call_end",
@@ -138,6 +150,10 @@ class PiAgentSession implements AgentSession {
 
 				case "turn_start":
 				case "turn_end":
+				case "auto_compaction_start":
+				case "auto_compaction_end":
+				case "auto_retry_start":
+				case "auto_retry_end":
 					break
 			}
 		})
@@ -146,13 +162,13 @@ class PiAgentSession implements AgentSession {
 			signal.addEventListener(
 				"abort",
 				() => {
-					this.agent.abort()
+					void session.abort()
 				},
 				{ once: true },
 			)
 		}
 
-		const promptPromise = this.agent.prompt(content).catch((err: unknown) => {
+		const promptPromise = session.prompt(content).catch((err: unknown) => {
 			const errorMsg = err instanceof Error ? err.message : "Unknown agent error"
 			enqueue({ type: "error", error: errorMsg })
 			done = true

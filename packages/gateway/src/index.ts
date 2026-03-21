@@ -1,3 +1,4 @@
+import "dotenv/config"
 import { serve } from "@hono/node-server"
 import { createPool } from "@openzosma/db"
 import { WebSocketServer } from "ws"

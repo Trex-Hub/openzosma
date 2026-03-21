@@ -16,14 +16,20 @@
 		}
 	},
 	"scripts": {
-		"build": "tsc",
+		"build": "pnpm run compile && pnpm run copy-assets",
+		"compile": "tsc",
+		"copy-assets": "mkdir -p dist/pi/subagents && cp src/pi/subagents/*.md dist/pi/subagents/",
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@mariozechner/pi-agent-core": "^0.60.0",
+		"@aliou/pi-guardrails": "^0.9.5",
 		"@mariozechner/pi-ai": "^0.60.0",
 		"@mariozechner/pi-coding-agent": "^0.60.0",
-		"@sinclair/typebox": "^0.34.48"
+		"@sinclair/typebox": "^0.34.48",
+		"dotenv": "17.3.1",
+		"pi-subagents": "^0.11.6",
+		"pi-web-access": "^0.10.3",
+		"uuid": "^13.0.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.2",
