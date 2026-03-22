@@ -2,82 +2,32 @@
 
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
+import useDeleteConversation from "@/src/hooks/chat/use-delete-conversation"
+import useGetConversations from "@/src/hooks/chat/use-get-conversations"
 import { cn } from "@/src/lib/utils"
 import { IconMessageCircle, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react"
+import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useCallback, useEffect, useState } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
-
-type ConversationSummary = {
-	id: string
-	title: string
-	createdby: string
-	createdat: string
-	updatedat: string
-	lastmessage: string | null
-	messagecount: number
-}
 
 const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 	const router = useRouter()
 	const pathname = usePathname()
-	const [conversations, setConversations] = useState<ConversationSummary[]>([])
-	const [loading, setLoading] = useState(true)
 	const [search, setSearch] = useState("")
 
 	const activeconversationid = pathname.split("/chat/")[1] || null
 
-	const fetchconversations = useCallback(async () => {
-		try {
-			const res = await fetch("/api/conversations")
-			if (res.ok) {
-				const data = await res.json()
-				setConversations(data.conversations ?? [])
-			}
-		} catch {
-			toast.error("Failed to load conversations")
-		}
-		setLoading(false)
-	}, [])
-
-	useEffect(() => {
-		fetchconversations()
-	}, [fetchconversations])
-
-	const handlenewchat = async () => {
-		try {
-			const res = await fetch("/api/conversations", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					title: "New Conversation",
-					agentid: "dbchatagent",
-					agentname: "DB Chat Agent",
-				}),
-			})
-			if (res.ok) {
-				const data = await res.json()
-				fetchconversations()
-				router.push(`/chat/${data.conversation.id}`)
-				onNavigate?.()
-			}
-		} catch {
-			toast.error("Failed to create conversation")
-		}
-	}
+	const { data: conversations = [], isLoading: loading } = useGetConversations()
+	const deleteConversation = useDeleteConversation()
 
 	const handledelete = async (conversationid: string, e: React.MouseEvent) => {
 		e.stopPropagation()
 		try {
-			const res = await fetch(`/api/conversations/${conversationid}`, {
-				method: "DELETE",
-			})
-			if (res.ok) {
-				toast.success("Conversation deleted")
-				fetchconversations()
-				if (activeconversationid === conversationid) {
-					router.push("/chat")
-				}
+			await deleteConversation.mutateAsync(conversationid)
+			toast.success("Conversation deleted")
+			if (activeconversationid === conversationid) {
+				router.push("/chat")
 			}
 		} catch {
 			toast.error("Failed to delete conversation")
@@ -103,8 +53,10 @@ const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 			{/* Header */}
 			<div className="flex items-center justify-between p-4 border-b shrink-0">
 				<h3 className="font-semibold text-sm">Conversations</h3>
-				<Button size="icon-sm" variant="ghost" onClick={handlenewchat}>
-					<IconPlus className="size-4" />
+				<Button size="icon-sm" variant="ghost">
+					<Link href="/chat">
+						<IconPlus className="size-4" />
+					</Link>
 				</Button>
 			</div>
 
@@ -121,7 +73,7 @@ const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 				</div>
 			</div>
 
-			{/* Conversation List — plain div, no Radix ScrollArea */}
+			{/* Conversation List */}
 			<div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
 				<div className="flex flex-col gap-1 p-2">
 					{loading ? (
@@ -133,9 +85,11 @@ const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
 								{search ? "No matching conversations" : "No conversations yet"}
 							</p>
 							{!search && (
-								<Button size="sm" variant="outline" onClick={handlenewchat} className="text-xs">
-									<IconPlus className="size-3" />
-									Start a conversation
+								<Button size="sm" variant="outline" className="text-xs">
+									<Link href="/chat">
+										<IconPlus className="size-3" />
+										Start a conversation
+									</Link>
 								</Button>
 							)}
 						</div>
