@@ -7,10 +7,9 @@ import {
 } from "@/src/components/ai-elements/conversation";
 import PromptInput from "./prompt-input";
 import { IconSparkles } from "@tabler/icons-react";
-import type { FileUIPart } from "ai";
 import { AnimatePresence, motion } from "framer-motion";
-import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
+import { useRef } from "react";
 import { ChatHeader } from "./chat-header";
 import { ChatMessage } from "./chat-message";
 import { useConversation } from "./hooks/use-conversation";
@@ -19,10 +18,7 @@ import { StreamingResponse } from "./streaming-response";
 
 const ChatView = () => {
   const { conversationid } = useParams<{ conversationid: string }>();
-  const searchparams = useSearchParams();
   const textarearef = useRef<HTMLTextAreaElement>(null);
-  const initialhandled = useRef(false);
-
   const { conversation, participants, messages, loading } =
     useConversation(conversationid);
   const {
