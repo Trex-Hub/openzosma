@@ -42,9 +42,7 @@ function AttachmentList({ attachments }: AttachmentListProps) {
 						<FileIcon className="size-4 text-muted-foreground" />
 						<div className="min-w-0">
 							<p className="truncate font-medium text-xs">{att.filename || "Download"}</p>
-							{att.sizebytes && (
-								<p className="text-[10px] text-muted-foreground">{formatsizebytes(att.sizebytes)}</p>
-							)}
+							{att.sizebytes && <p className="text-[10px] text-muted-foreground">{formatsizebytes(att.sizebytes)}</p>}
 						</div>
 						<DownloadIcon className="size-3.5 text-muted-foreground shrink-0" />
 					</a>

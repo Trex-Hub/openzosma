@@ -1,8 +1,4 @@
-import type {
-	ChatMessage,
-	ChatParticipant,
-	ConversationData,
-} from "@/src/components/organisms/chat-view/types"
+import type { ChatMessage, ChatParticipant, ConversationData } from "@/src/components/organisms/chat-view/types"
 import { ApiService } from "."
 
 export type ConversationSummary = {

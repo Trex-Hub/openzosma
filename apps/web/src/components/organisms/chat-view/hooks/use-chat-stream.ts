@@ -2,12 +2,12 @@
 
 import { useSaveMessage } from "@/src/hooks/chat/use-save-message"
 import { GATEWAY_URL } from "@/src/lib/constants"
+import { QUERY_KEYS } from "@/src/utils/query-keys"
 import type { AgentStreamEvent } from "@openzosma/agents/types"
-import type { FileUIPart } from "ai"
 import { useQueryClient } from "@tanstack/react-query"
+import type { FileUIPart } from "ai"
 import { useCallback, useState } from "react"
 import { toast } from "sonner"
-import { QUERY_KEYS } from "@/src/utils/query-keys"
 import type { ChatAttachment, ChatMessage, ChatParticipant, ConversationData, StreamToolCall } from "../types"
 
 type SubmitMessage = {
@@ -50,32 +50,47 @@ export function useChatStream(
 				content: message.text,
 				metadata: {},
 				createdat: new Date().toISOString(),
-				attachments: message.files.map((f, i): ChatAttachment => ({
-					id: `temp-att-${i}`,
-					type: f.mediaType?.startsWith("image/") ? "media" : "file",
-					filename: f.filename || null,
-					mediatype: f.mediaType || null,
-					url: f.url || null,
-					sizebytes: null,
-					metadata: {},
-				})),
+				attachments: message.files.map(
+					(f, i): ChatAttachment => ({
+						id: `temp-att-${i}`,
+						type: f.mediaType?.startsWith("image/") ? "media" : "file",
+						filename: f.filename || null,
+						mediatype: f.mediaType || null,
+						url: f.url || null,
+						sizebytes: null,
+						metadata: {},
+					}),
+				),
 			}
 			queryClient.setQueryData(
 				[QUERY_KEYS.CONVERSATION, conversationid],
-				(old: { conversation: ConversationData; participants: ChatParticipant[]; messages: ChatMessage[] } | undefined) => {
+				(
+					old: { conversation: ConversationData; participants: ChatParticipant[]; messages: ChatMessage[] } | undefined,
+				) => {
 					if (!old) return old
 					return { ...old, messages: [...old.messages, usermsg] }
 				},
 			)
 
-			await saveMessage({
-				conversationid,
-				payload: {
-					sendertype: "human",
-					senderid: userid,
-					content: message.text,
-				},
-			})
+			try {
+				await saveMessage({
+					conversationid,
+					payload: {
+						sendertype: "human",
+						senderid: userid,
+						content: message.text,
+						attachments: message.files.map((f) => ({
+							type: f.mediaType?.startsWith("image/") ? "media" : "file",
+							filename: f.filename ?? "",
+							mediatype: f.mediaType ?? "",
+							url: f.url ?? "",
+							sizebytes: 0,
+						})),
+					},
+				})
+			} catch (err) {
+				console.error("Failed to save user message:", err)
+			}
 
 			const agentparticipant = participants.find((p) => p.participanttype === "agent")
 			if (!agentparticipant) {
@@ -208,14 +223,18 @@ export function useChatStream(
 					}
 				})
 
-				await saveMessage({
-					conversationid,
-					payload: {
-						sendertype: "agent",
-						senderid: agentparticipant.participantid,
-						content: fullcontent,
-					},
-				})
+				try {
+					await saveMessage({
+						conversationid,
+						payload: {
+							sendertype: "agent",
+							senderid: agentparticipant.participantid,
+							content: fullcontent,
+						},
+					})
+				} catch (err) {
+					console.error("Failed to save agent message:", err)
+				}
 
 				// Refresh the conversation to get the persisted agent message
 				queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CONVERSATION, conversationid] })
