@@ -24,8 +24,8 @@
 		"@openzosma/db": "workspace:*",
 		"@openzosma/grpc": "workspace:*",
 		"@openzosma/orchestrator": "workspace:*",
-		"dotenv": "17.3.1",
 		"a2a-js": "^0.2.0",
+		"dotenv": "17.3.1",
 		"hono": "^4.7.6",
 		"ws": "^8.18.1"
 	},
@@ -33,6 +33,7 @@
 		"@types/node": "^22.15.2",
 		"@types/ws": "^8.18.1",
 		"tsx": "^4.19.3",
-		"typescript": "^5.7.3"
+		"typescript": "^5.7.3",
+		"vitest": "^3.2.4"
 	}
 }
