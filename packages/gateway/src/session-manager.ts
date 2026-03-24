@@ -21,6 +21,12 @@ export class SessionManager {
 	private emitters = new Map<string, EventEmitter>()
 	private provider: AgentProvider
 	private pool: Pool | undefined
+	/**
+	 * Mutex that serializes the critical section between setting PI_MEMORY_DIR
+	 * (process.env) and the jiti extension import that reads it. Without this,
+	 * concurrent createSession() calls would race on the shared env var.
+	 */
+	private initLock: Promise<void> = Promise.resolve()
 
 	constructor(provider?: AgentProvider, pool?: Pool) {
 		this.provider = provider ?? new PiAgentProvider()
@@ -69,6 +75,11 @@ export class SessionManager {
 		const sessionDir = join(workspaceRoot, "sessions", session.id)
 		mkdirSync(sessionDir, { recursive: true })
 
+		// Memory must persist across sessions. Use a stable directory keyed by
+		// agent config, or a shared default when no config is specified.
+		const memoryKey = agentConfigId ?? "default"
+		const memoryDir = join(workspaceRoot, "agents", memoryKey, "memory")
+		mkdirSync(memoryDir, { recursive: true })
 		const kbRoot = resolve(process.env.KNOWLEDGE_BASE_PATH ?? join(process.cwd(), "../../.knowledge-base"))
 		if (existsSync(kbRoot)) {
 			cpSync(kbRoot, join(sessionDir, ".knowledge-base"), { recursive: true })
@@ -92,11 +103,28 @@ export class SessionManager {
 			}
 		}
 
+		// Serialize session creation so that process.env.PI_MEMORY_DIR (set by
+		// bootstrapMemory, read by pi-memory at jiti import time) is not clobbered
+		// by a concurrent session before the extension loader reads it.
+		const prevLock = this.initLock
+		let releaseLock: () => void
+		this.initLock = new Promise<void>((r) => {
+			releaseLock = r
+		})
+		await prevLock
+
 		const agentSession = this.provider.createSession({
 			sessionId: session.id,
 			workspaceDir: sessionDir,
+			memoryDir,
 			...agentConfig,
 		})
+
+		// Release the lock after a short delay to let the extension loader read
+		// PI_MEMORY_DIR. The env var is set synchronously in the PiAgentSession
+		// constructor (which ran above), and the jiti import happens in the async
+		// init inside that constructor. A 100ms window is conservative.
+		setTimeout(() => releaseLock!(), 100)
 
 		this.sessions.set(session.id, { agentSession, session })
 		return session
