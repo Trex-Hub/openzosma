@@ -9,7 +9,7 @@ import { DEFAULT_MODELS, PROVIDER_PREFERENCE } from "./config.js"
  * The model uses the `openai-completions` API with conservative compat
  * settings that work with llama.cpp, Ollama, vLLM, and similar servers.
  */
-function buildLocalModel(): Model<"openai-completions"> | undefined {
+const buildLocalModel = (): Model<"openai-completions"> | undefined => {
 	const baseUrl = process.env.OPENZOSMA_LOCAL_MODEL_URL
 	if (!baseUrl) return undefined
 
@@ -56,7 +56,7 @@ export interface ResolveModelOpts {
  * 3. Explicit OPENZOSMA_MODEL_PROVIDER + OPENZOSMA_MODEL_ID env vars
  * 4. Auto-detect from available API keys using PROVIDER_PREFERENCE order
  */
-export function resolveModel(opts?: ResolveModelOpts): { model: Model<Api>; apiKey: string } {
+export const resolveModel = (opts?: ResolveModelOpts): { model: Model<Api>; apiKey: string } => {
 	// --- Priority 1: Local OpenAI-compatible model ---
 	const localModel = buildLocalModel()
 	if (localModel) {
