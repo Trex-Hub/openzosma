@@ -50,6 +50,13 @@ export interface AgentSessionOpts {
 	sessionId: string
 	workspaceDir: string
 	/**
+	 * Stable directory for long-term memory that persists across sessions.
+	 * When omitted, defaults to workspaceDir (memory is per-session and lost on
+	 * new conversations). Should point to a directory shared by all sessions
+	 * belonging to the same agent configuration.
+	 */
+	memoryDir?: string
+	/**
 	 * LLM provider name (e.g. "anthropic", "openai").
 	 * When omitted, resolved from environment variables.
 	 */

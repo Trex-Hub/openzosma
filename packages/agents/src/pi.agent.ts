@@ -7,6 +7,7 @@ import {
 	SessionManager,
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent"
+import { bootstrapMemory } from "@openzosma/memory"
 import { DEFAULT_SYSTEM_PROMPT } from "./pi/config.js"
 import { bootstrapPiExtensions } from "./pi/extensions/index.js"
 import { resolveModel } from "./pi/model.js"
@@ -34,6 +35,10 @@ class PiAgentSession implements AgentSession {
 	private messages: AgentMessage[] = []
 
 	constructor(opts: AgentSessionOpts) {
+		const memoryResult = bootstrapMemory({
+			workspaceDir: opts.workspaceDir,
+			memoryDir: opts.memoryDir,
+		})
 		const toolList = [...createDefaultTools(opts.workspaceDir, opts.toolsEnabled)]
 		const { model, apiKey } = resolveModel({
 			provider: opts.provider,
@@ -44,7 +49,7 @@ class PiAgentSession implements AgentSession {
 
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: opts.workspaceDir,
-			additionalExtensionPaths: extensionPaths,
+			additionalExtensionPaths: [...extensionPaths, ...memoryResult.paths],
 			systemPrompt: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
 		})
 
@@ -76,6 +81,8 @@ class PiAgentSession implements AgentSession {
 
 	async *sendMessage(content: string, signal?: AbortSignal): AsyncGenerator<AgentStreamEvent> {
 		const session = await this.sessionPromise
+
+		const promptContent = content
 
 		const userMsg: AgentMessage = {
 			id: randomUUID(),
@@ -202,7 +209,7 @@ class PiAgentSession implements AgentSession {
 			)
 		}
 
-		const promptPromise = session.prompt(content).catch((err: unknown) => {
+		const promptPromise = session.prompt(promptContent).catch((err: unknown) => {
 			const errorMsg = err instanceof Error ? err.message : "Unknown agent error"
 			enqueue({ type: "error", error: errorMsg })
 			done = true
