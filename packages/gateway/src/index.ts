@@ -1,5 +1,6 @@
 import "dotenv/config"
 import { serve } from "@hono/node-server"
+import { createAuthFromEnv } from "@openzosma/auth"
 import { createPool } from "@openzosma/db"
 import { WebSocketServer } from "ws"
 import { createApp } from "./app.js"
@@ -38,7 +39,8 @@ async function createSessionManager(): Promise<SessionManager> {
 }
 
 const sessionManager = await createSessionManager()
-const app = createApp(sessionManager, pool)
+const auth = pool ? createAuthFromEnv() : undefined
+const app = createApp(sessionManager, pool, auth)
 
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
 	console.log(`Gateway listening on ${HOST}:${PORT}`)

@@ -1,7 +1,8 @@
 import type { MiddlewareHandler } from "hono"
 import type { Pool } from "@openzosma/db"
 import type { Auth } from "@openzosma/auth"
-import { validateApiKey } from "@openzosma/auth"
+import { validateApiKey, hasPermission } from "@openzosma/auth"
+import type { Role } from "@openzosma/auth"
 
 /**
  * Auth middleware for /api/v1/* routes.
@@ -13,11 +14,12 @@ import { validateApiKey } from "@openzosma/auth"
  *  2. Better Auth session cookie — parsed by Better Auth's `getSession`.
  *
  * On success, sets context variables:
- *  - `userId` (string)      — set when authenticated via session cookie
- *  - `apiKeyId` (string)    — set when authenticated via API key
+ *  - `userId` (string)        — set when authenticated via session cookie
+ *  - `userRole` (Role)        — user role from the users table (default: "member")
+ *  - `apiKeyId` (string)      — set when authenticated via API key
  *  - `apiKeyScopes` (string[]) — scopes granted to the API key
  */
-export function createAuthMiddleware(auth: Auth, pool: Pool): MiddlewareHandler {
+export const createAuthMiddleware = (auth: Auth, pool: Pool): MiddlewareHandler => {
 	return async (c, next) => {
 		const authHeader = c.req.header("Authorization")
 
@@ -38,9 +40,44 @@ export function createAuthMiddleware(auth: Auth, pool: Pool): MiddlewareHandler 
 		const session = await auth.api.getSession({ headers: c.req.raw.headers })
 		if (session) {
 			c.set("userId", session.user.id)
+			const role = ((session.user as Record<string, unknown>).role as Role) ?? "member"
+			c.set("userRole", role)
 			return next()
 		}
 
 		return c.json({ error: { code: "AUTH_REQUIRED", message: "Authentication required" } }, 401)
+	}
+}
+
+/**
+ * Middleware factory that enforces RBAC for session-based auth and
+ * scope checking for API-key-based auth.
+ *
+ * For session users: checks hasPermission(userRole, resource, action).
+ * For API key users: checks if apiKeyScopes includes "resource:action".
+ */
+export const requirePermission = (resource: string, action: string): MiddlewareHandler => {
+	return async (c, next) => {
+		const apiKeyId = c.get("apiKeyId") as string | undefined
+		if (apiKeyId) {
+			const scopes = (c.get("apiKeyScopes") as string[]) ?? []
+			const requiredScope = `${resource}:${action}`
+			if (!scopes.includes(requiredScope)) {
+				return c.json(
+					{ error: { code: "FORBIDDEN", message: `API key missing required scope: ${requiredScope}` } },
+					403,
+				)
+			}
+			return next()
+		}
+
+		const role = c.get("userRole") as Role | undefined
+		if (!role || !hasPermission(role, resource, action)) {
+			return c.json(
+				{ error: { code: "FORBIDDEN", message: `Insufficient permissions for ${resource}:${action}` } },
+				403,
+			)
+		}
+		return next()
 	}
 }

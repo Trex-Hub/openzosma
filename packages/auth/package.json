@@ -17,6 +17,8 @@
 	},
 	"dependencies": {
 		"better-auth": "^1.2.7",
+		"@better-auth/kysely-adapter": "^1.5.5",
+		"kysely": "^0.27.6",
 		"@openzosma/db": "workspace:*",
 		"pg": "^8.13.3"
 	},

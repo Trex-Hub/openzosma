@@ -2,32 +2,31 @@ import { createHash, randomBytes } from "node:crypto"
 import { buildDefaultAgentCard } from "@openzosma/a2a"
 import type { Pool } from "@openzosma/db"
 import { agentConfigQueries, apiKeyQueries } from "@openzosma/db"
-import type { Context } from "hono"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { streamSSE } from "hono/streaming"
 import type { Auth } from "@openzosma/auth"
-import { createAuthMiddleware } from "./middleware/auth.js"
+import type { Role } from "@openzosma/auth"
+import { createAuthMiddleware, requirePermission } from "./middleware/auth.js"
 import { createPerAgentRouter } from "./a2a.js"
 import type { SessionManager } from "./session-manager.js"
 
-/**
- * Extract userId from request. Currently reads from X-User-Id header.
- * Will be replaced by Better Auth session middleware when wired in.
- */
-const getUserId = (c: Context): string | undefined => {
-	return c.req.header("X-User-Id") ?? undefined
+interface AppVariables {
+	userId: string
+	userRole: Role
+	apiKeyId: string
+	apiKeyScopes: string[]
 }
 
-export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Auth): Hono => {
-	const app = new Hono()
+export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Auth) => {
+	const app = new Hono<{ Variables: AppVariables }>()
 
 	app.use(
 		"*",
 		cors({
 			origin: ["http://localhost:3000"],
 			allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-			allowHeaders: ["Content-Type", "Authorization", "X-User-Id"],
+			allowHeaders: ["Content-Type", "Authorization"],
 		}),
 	)
 
@@ -70,13 +69,13 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 	// Session routes
 	// -----------------------------------------------------------------------
 
-	app.post("/api/v1/sessions", async (c) => {
-		const userId = getUserId(c)
+	app.post("/api/v1/sessions", requirePermission("sessions", "write"), async (c) => {
+		const userId = c.get("userId") as string | undefined
 		const session = await sessionManager.createSession(undefined, undefined, undefined, userId)
 		return c.json({ id: session.id, createdAt: session.createdAt }, 201)
 	})
 
-	app.get("/api/v1/sessions/:id", (c) => {
+	app.get("/api/v1/sessions/:id", requirePermission("sessions", "read"), (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
 			return c.json({ error: "Session not found" }, 404)
@@ -88,7 +87,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 		})
 	})
 
-	app.delete("/api/v1/sessions/:id", (c) => {
+	app.delete("/api/v1/sessions/:id", requirePermission("sessions", "delete"), (c) => {
 		const deleted = sessionManager.deleteSession(c.req.param("id"))
 		if (!deleted) {
 			return c.json({ error: "Session not found" }, 404)
@@ -96,7 +95,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 		return c.json({ ok: true })
 	})
 
-	app.post("/api/v1/sessions/:id/messages", async (c) => {
+	app.post("/api/v1/sessions/:id/messages", requirePermission("sessions", "write"), async (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
 			return c.json({ error: "Session not found" }, 404)
@@ -107,7 +106,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 			return c.json({ error: "content is required" }, 400)
 		}
 
-		const userId = getUserId(c)
+		const userId = c.get("userId") as string | undefined
 		const events = []
 		for await (const event of sessionManager.sendMessage(c.req.param("id"), body.content, undefined, userId)) {
 			events.push(event)
@@ -121,7 +120,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 		return c.json({ role: "assistant", content: text })
 	})
 
-	app.get("/api/v1/sessions/:id/messages", (c) => {
+	app.get("/api/v1/sessions/:id/messages", requirePermission("sessions", "read"), (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
 			return c.json({ error: "Session not found" }, 404)
@@ -133,12 +132,12 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 	// Artifact routes
 	// -----------------------------------------------------------------------
 
-	app.get("/api/v1/sessions/:id/artifacts", (c) => {
+	app.get("/api/v1/sessions/:id/artifacts", requirePermission("sessions", "read"), (c) => {
 		const artifacts = sessionManager.artifactManager.listArtifacts(c.req.param("id"))
 		return c.json({ artifacts })
 	})
 
-	app.get("/api/v1/sessions/:id/artifacts/:filename", (c) => {
+	app.get("/api/v1/sessions/:id/artifacts/:filename", requirePermission("sessions", "read"), (c) => {
 		const sessionId = c.req.param("id")
 		const filename = c.req.param("filename")
 		const result = sessionManager.artifactManager.getArtifactStream(sessionId, filename)
@@ -160,7 +159,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 
 	// SSE stream — subscribe to real-time events for a session.
 	// Will switch to Valkey pub/sub when the orchestrator is in place.
-	app.get("/api/v1/sessions/:id/stream", (c) => {
+	app.get("/api/v1/sessions/:id/stream", requirePermission("sessions", "read"), (c) => {
 		const session = sessionManager.getSession(c.req.param("id"))
 		if (!session) {
 			return c.json({ error: "Session not found" }, 404)
@@ -181,7 +180,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 	// -----------------------------------------------------------------------
 
 	if (pool) {
-		app.get("/api/v1/agents", async (c) => {
+		app.get("/api/v1/agents", requirePermission("agent_configs", "read"), async (c) => {
 			const agents = await agentConfigQueries.listAgentConfigs(pool)
 			return c.json({
 				agents: agents.map((a) => ({
@@ -196,7 +195,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 			})
 		})
 
-		app.get("/api/v1/agents/:id", async (c) => {
+		app.get("/api/v1/agents/:id", requirePermission("agent_configs", "read"), async (c) => {
 			const agent = await agentConfigQueries.getAgentConfig(pool, c.req.param("id"))
 			if (!agent) {
 				return c.json({ error: "Agent config not found" }, 404)
@@ -210,7 +209,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 	// -----------------------------------------------------------------------
 
 	if (pool) {
-		app.post("/api/v1/api-keys", async (c) => {
+		app.post("/api/v1/api-keys", requirePermission("api_keys", "write"), async (c) => {
 			const body = await c.req.json<{ name: string; scopes?: string[]; expiresAt?: string }>()
 			if (!body.name) {
 				return c.json({ error: "name is required" }, 400)
@@ -225,7 +224,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 			return c.json({ id: apiKey.id, key: rawKey }, 201)
 		})
 
-		app.get("/api/v1/api-keys", async (c) => {
+		app.get("/api/v1/api-keys", requirePermission("api_keys", "read"), async (c) => {
 			const keys = await apiKeyQueries.listApiKeys(pool)
 			return c.json({
 				keys: keys.map((k) => ({
@@ -240,7 +239,7 @@ export const createApp = (sessionManager: SessionManager, pool?: Pool, auth?: Au
 			})
 		})
 
-		app.delete("/api/v1/api-keys/:id", async (c) => {
+		app.delete("/api/v1/api-keys/:id", requirePermission("api_keys", "delete"), async (c) => {
 			await apiKeyQueries.deleteApiKey(pool, c.req.param("id"))
 			return c.json({ ok: true })
 		})
