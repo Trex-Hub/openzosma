@@ -17,7 +17,7 @@ The gateway MVP is functional with a reduced scope to get the end-to-end flow wo
 | OpenAI streaming (gpt-4o-mini, via `openai` SDK) | Done |
 | CORS (localhost:3000) | Done |
 | Health check (`GET /health`) | Done |
-| Auth middleware | Not yet |
+| Auth middleware | Done |
 | gRPC client to orchestrator | Not yet (gateway calls OpenAI directly) |
 | A2A protocol (per-agent cards, `a2a-js` SDK) | Done |
 | SSE endpoint (`tasks/sendSubscribe`) | Done |
