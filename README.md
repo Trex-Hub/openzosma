@@ -1,6 +1,39 @@
-# OpenZosma
+<div align="center">
 
-**Build AI teams that work alongside yours -- accessible from your phone.**
+<img src="assets/logo.png" alt="OpenZosma" width="400" />
+
+<h3>Build AI teams that work alongside yours -- accessible from your phone.</h3>
+
+<p>
+Open-source, self-hosted platform for hierarchical AI agents.<br />
+Delegate tasks through natural conversation from WhatsApp, Slack, or a web dashboard.
+</p>
+
+<p>
+  <a href="https://github.com/zosmaai/openzosma/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zosmaai/openzosma?style=flat-square&color=blue" alt="License" /></a>
+  <a href="https://github.com/zosmaai/openzosma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zosmaai/openzosma/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/create-openzosma"><img src="https://img.shields.io/npm/v/create-openzosma?style=flat-square&color=cb3837&label=npm" alt="npm" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square" alt="Node.js >= 22" />
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+</p>
+
+<p>
+  <a href="https://github.com/zosmaai/openzosma/stargazers"><img src="https://img.shields.io/github/stars/zosmaai/openzosma?style=flat-square" alt="Stars" /></a>
+  <a href="https://github.com/zosmaai/openzosma/graphs/contributors"><img src="https://img.shields.io/github/contributors/zosmaai/openzosma?style=flat-square" alt="Contributors" /></a>
+  <a href="https://github.com/zosmaai/openzosma/issues"><img src="https://img.shields.io/github/issues/zosmaai/openzosma?style=flat-square" alt="Issues" /></a>
+  <a href="https://github.com/zosmaai/openzosma/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" /></a>
+</p>
+
+<p>
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="./ARCHITECTURE.md">Architecture</a> &middot;
+  <a href="./CONTRIBUTING.md">Contributing</a> &middot;
+  <a href="./docs/">Docs</a>
+</p>
+
+</div>
+
+---
 
 OpenZosma is an open-source, self-hosted platform for creating hierarchical AI agents that act as digital work twins for your team. Configure an agent org chart that mirrors your business structure, delegate tasks through natural conversation, and manage your operations from anywhere -- your phone, WhatsApp, Slack, or a web dashboard. No laptop required.
 
