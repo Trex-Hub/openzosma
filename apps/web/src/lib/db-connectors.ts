@@ -190,7 +190,7 @@ export async function querypostgresql(config: ConnectionConfig, query: string): 
 			// Enforce read-only at the database level so the server rejects
 			// any write attempt regardless of the keyword check above.
 			await client.query("BEGIN TRANSACTION READ ONLY")
-			const result = await client.query(safequery) // CodeQL[js/sql-injection] -- intentionally user-provided; guarded by read-only transaction
+			const result = await client.query(safequery)
 			await client.query("COMMIT")
 			const latencyms = Date.now() - start
 			return {
@@ -253,7 +253,7 @@ export async function querymysql(config: ConnectionConfig, query: string): Promi
 		await connection.query("SET SESSION TRANSACTION READ ONLY")
 		await connection.query("START TRANSACTION")
 
-		const [rows, fields] = await connection.query(safequery) // CodeQL[js/sql-injection] -- intentionally user-provided; guarded by read-only transaction
+		const [rows, fields] = await connection.query(safequery)
 		await connection.query("COMMIT")
 
 		const latencyms = Date.now() - start
