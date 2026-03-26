@@ -91,21 +91,21 @@ export const runPipeline = async (postClone: boolean): Promise<void> => {
 		return
 	}
 
-	// Step 10: Migrations
-	try {
-		await runMigrations(projectDir)
-	} catch (err) {
-		log.error(`Database migrations failed: ${err instanceof Error ? err.message : String(err)}`)
-		log.warn("Ensure PostgreSQL is running and run 'pnpm db:migrate && pnpm db:migrate:auth' manually.")
-	}
-
-	// Step 11: Build
+	// Step 10: Build (must come before migrations -- @openzosma/logger needs to be compiled)
 	try {
 		await buildProject(projectDir)
 	} catch (err) {
 		log.error(`Build failed: ${err instanceof Error ? err.message : String(err)}`)
 		log.warn("Run 'pnpm run build' manually to retry.")
 		return
+	}
+
+	// Step 11: Migrations (requires build output from step 10)
+	try {
+		await runMigrations(projectDir)
+	} catch (err) {
+		log.error(`Database migrations failed: ${err instanceof Error ? err.message : String(err)}`)
+		log.warn("Ensure PostgreSQL is running and run 'pnpm db:migrate && pnpm db:migrate:auth' manually.")
 	}
 
 	// Step 12: Finish
