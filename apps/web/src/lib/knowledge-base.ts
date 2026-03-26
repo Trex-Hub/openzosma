@@ -40,6 +40,6 @@ export const syncToGateway = async (
 			body: JSON.stringify({ action, path: kbPath, content }),
 		})
 	} catch (err) {
-		console.error(`[knowledge-base] syncToGateway failed (${action} ${kbPath}):`, err)
+		console.error("[knowledge-base] syncToGateway failed (%s %s):", action, kbPath, err)
 	}
 }
