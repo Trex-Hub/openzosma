@@ -10,6 +10,9 @@ export type {
 	UsageRecord,
 	Connection,
 	ConnectionType,
+	Integration,
+	IntegrationConfig,
+	IntegrationStatus,
 	Setting,
 	UserSandbox,
 	SandboxStatus,
@@ -20,5 +23,6 @@ export * as agentConfigQueries from "./queries/agent-configs.js"
 export * as apiKeyQueries from "./queries/api-keys.js"
 export * as usageQueries from "./queries/usage.js"
 export * as connectionQueries from "./queries/connections.js"
+export * as integrationQueries from "./queries/integrations.js"
 export * as settingQueries from "./queries/settings.js"
 export * as userSandboxQueries from "./queries/user-sandboxes.js"
