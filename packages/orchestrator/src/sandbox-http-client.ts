@@ -110,6 +110,9 @@ export class SandboxHttpClient {
 	 * is a JSON-encoded AgentStreamEvent.
 	 */
 	async *sendMessage(sessionId: string, content: string, signal?: AbortSignal): AsyncGenerator<AgentStreamEvent> {
+		log.info("Sending message to sandbox", { sessionId, contentLength: content.length })
+		const fetchStart = Date.now()
+
 		const res = await this.fetch(`/sessions/${sessionId}/messages`, {
 			method: "POST",
 			body: JSON.stringify({ content }),
@@ -123,12 +126,14 @@ export class SandboxHttpClient {
 			throw new Error(`Sandbox message request failed (${res.status}): ${text}`)
 		}
 
+		log.debug("Sandbox SSE stream opened", { sessionId, status: res.status, fetchMs: Date.now() - fetchStart })
+
 		const body = res.body
 		if (!body) {
 			throw new Error("No response body from sandbox-server")
 		}
 
-		yield* this.parseSSE(body, signal)
+		yield* this.parseSSE(body, signal, sessionId)
 	}
 
 	async cancelSession(sessionId: string): Promise<boolean> {
@@ -324,18 +329,72 @@ export class SandboxHttpClient {
 	// SSE parser
 	// -----------------------------------------------------------------------
 
-	private async *parseSSE(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<AgentStreamEvent> {
+	private async *parseSSE(
+		body: ReadableStream<Uint8Array>,
+		signal?: AbortSignal,
+		sessionId?: string,
+	): AsyncGenerator<AgentStreamEvent> {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
 		let currentData = ""
 		let chunkCount = 0
+		let eventCount = 0
+		const startTime = Date.now()
+
+		/**
+		 * Race reader.read() against the abort signal. Without this,
+		 * reader.read() can hang indefinitely if the sandbox agent
+		 * freezes but the TCP connection stays open. The native fetch
+		 * signal should also abort the read, but this is defense-in-depth.
+		 */
+		const readWithSignal = async (): Promise<{ done: boolean; value?: Uint8Array }> => {
+			if (!signal) return reader.read()
+
+			return new Promise<{ done: boolean; value?: Uint8Array }>((resolve, reject) => {
+				if (signal.aborted) {
+					reject(new DOMException("Aborted", "AbortError"))
+					return
+				}
+
+				let settled = false
+
+				const onAbort = () => {
+					if (!settled) {
+						settled = true
+						reject(new DOMException("Aborted", "AbortError"))
+					}
+				}
+
+				signal.addEventListener("abort", onAbort, { once: true })
+
+				reader
+					.read()
+					.then((result) => {
+						if (!settled) {
+							settled = true
+							signal.removeEventListener("abort", onAbort)
+							resolve(result)
+						}
+					})
+					.catch((err) => {
+						if (!settled) {
+							settled = true
+							signal.removeEventListener("abort", onAbort)
+							reject(err)
+						}
+					})
+			})
+		}
 
 		try {
 			while (true) {
-				if (signal?.aborted) break
+				if (signal?.aborted) {
+					log.debug("parseSSE aborted by signal", { sessionId, chunkCount, eventCount })
+					break
+				}
 
-				const { done, value } = await reader.read()
+				const { done, value } = await readWithSignal()
 				if (done) {
 					break
 				}
@@ -355,9 +414,10 @@ export class SandboxHttpClient {
 						// Empty line = end of event
 						try {
 							const event = JSON.parse(currentData) as AgentStreamEvent
+							eventCount++
 							yield event
 						} catch (e) {
-							log.error("parseSSE error", { error: e instanceof Error ? e.message : String(e) })
+							log.error("parseSSE error", { sessionId, error: e instanceof Error ? e.message : String(e) })
 						}
 						currentData = ""
 					}
@@ -373,12 +433,29 @@ export class SandboxHttpClient {
 			if (currentData) {
 				try {
 					const event = JSON.parse(currentData) as AgentStreamEvent
+					eventCount++
 					yield event
 				} catch (e) {
-					log.error("parseSSE flush error", { error: e instanceof Error ? e.message : String(e) })
+					log.error("parseSSE flush error", { sessionId, error: e instanceof Error ? e.message : String(e) })
 				}
 			}
+
+			log.info("SSE stream completed", {
+				sessionId,
+				chunkCount,
+				eventCount,
+				durationMs: Date.now() - startTime,
+			})
 		} finally {
+			// Cancel the reader (signals the server that we're done), then
+			// release the lock. Without cancel(), the sandbox SSE stream
+			// stays open and the agent loop continues running even when the
+			// gateway/Slack adapter has timed out.
+			try {
+				await reader.cancel()
+			} catch {
+				// Ignore cancel errors (already closed, etc.)
+			}
 			reader.releaseLock()
 		}
 	}

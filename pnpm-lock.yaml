@@ -316,12 +316,9 @@ importers:
 
   packages/adapters/slack:
     dependencies:
-      '@openzosma/db':
+      '@openzosma/logger':
         specifier: workspace:*
-        version: link:../../db
-      '@openzosma/gateway':
-        specifier: workspace:*
-        version: link:../../gateway
+        version: link:../../logger
       '@slack/bolt':
         specifier: ^4.3.0
         version: 4.6.0(@types/express@5.0.6)
@@ -463,6 +460,9 @@ importers:
       '@openzosma/a2a':
         specifier: workspace:*
         version: link:../a2a
+      '@openzosma/adapter-slack':
+        specifier: workspace:*
+        version: link:../adapters/slack
       '@openzosma/agents':
         specifier: workspace:*
         version: link:../agents

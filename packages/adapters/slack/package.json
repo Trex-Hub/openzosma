@@ -16,8 +16,7 @@
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@openzosma/db": "workspace:*",
-		"@openzosma/gateway": "workspace:*",
+		"@openzosma/logger": "workspace:*",
 		"@slack/bolt": "^4.3.0"
 	},
 	"devDependencies": {

@@ -84,7 +84,13 @@ export class SessionManager {
 	async createSession(
 		id?: string,
 		agentConfigId?: string,
-		resolvedConfig?: { provider?: string; model?: string; systemPrompt?: string | null; toolsEnabled?: string[] },
+		resolvedConfig?: {
+			provider?: string
+			model?: string
+			systemPrompt?: string | null
+			systemPromptPrefix?: string
+			toolsEnabled?: string[]
+		},
 		userId?: string,
 	): Promise<Session> {
 		// If the caller supplies an ID that already exists, return the existing session.
@@ -431,37 +437,64 @@ export class SessionManager {
 			let lastMessageId: string | undefined
 			const emitter = this.getEmitter(sessionId)
 
-			for await (const event of this.orchestrator.sendMessage(sessionId, userId, augmentedContent, signal)) {
-				const gatewayEvent: GatewayEvent = event as GatewayEvent
+			const streamStartTime = Date.now()
+			let eventCount = 0
+			log.info("Orchestrator stream started", { sessionId, userId, contentLength: augmentedContent.length })
 
-				if (event.type === "message_start") {
-					lastMessageId = event.id
-					lastAssistantText = ""
-				} else if (event.type === "message_update" && event.text) {
-					lastAssistantText += event.text
-				}
+			try {
+				for await (const event of this.orchestrator.sendMessage(sessionId, userId, augmentedContent, signal)) {
+					const gatewayEvent: GatewayEvent = event as GatewayEvent
+					eventCount++
 
-				// Intercept file_output events from sandbox: strip base64 content
-				// and forward metadata only. The artifacts are already stored in
-				// the sandbox filesystem under user-files/ai-generated/<sessionId>/.
-				if (gatewayEvent.type === "file_output" && gatewayEvent.artifacts) {
-					const cleanArtifacts: FileArtifact[] = gatewayEvent.artifacts.map((a) => ({
-						filename: a.filename,
-						mediatype: a.mediatype,
-						sizebytes: a.sizebytes,
-					}))
-					const cleanEvent: GatewayEvent = {
-						type: "file_output",
-						artifacts: cleanArtifacts,
+					if (event.type === "message_start") {
+						lastMessageId = event.id
+						lastAssistantText = ""
+					} else if (event.type === "message_update" && event.text) {
+						lastAssistantText += event.text
 					}
-					emitter.emit("event", cleanEvent)
-					yield cleanEvent
-					continue
-				}
 
-				emitter.emit("event", gatewayEvent)
-				yield gatewayEvent
+					// Intercept file_output events from sandbox: strip base64 content
+					// and forward metadata only. The artifacts are already stored in
+					// the sandbox filesystem under user-files/ai-generated/<sessionId>/.
+					if (gatewayEvent.type === "file_output" && gatewayEvent.artifacts) {
+						const cleanArtifacts: FileArtifact[] = gatewayEvent.artifacts.map((a) => ({
+							filename: a.filename,
+							mediatype: a.mediatype,
+							sizebytes: a.sizebytes,
+						}))
+						const cleanEvent: GatewayEvent = {
+							type: "file_output",
+							artifacts: cleanArtifacts,
+						}
+						emitter.emit("event", cleanEvent)
+						yield cleanEvent
+						continue
+					}
+
+					emitter.emit("event", gatewayEvent)
+					yield gatewayEvent
+				}
+			} catch (err) {
+				// If the caller aborted (e.g. Slack adapter timeout), exit silently.
+				// The caller already knows the signal fired and will handle it.
+				if (signal?.aborted) {
+					log.debug("Orchestrator stream aborted by caller signal", { sessionId, eventCount })
+				} else {
+					const message = err instanceof Error ? err.message : "Unexpected error during agent stream"
+					log.error("Orchestrator stream threw", { sessionId, error: message, eventCount })
+					const errorEvent: GatewayEvent = { type: "error", error: message }
+					emitter.emit("event", errorEvent)
+					yield errorEvent
+				}
 			}
+
+			const streamDurationMs = Date.now() - streamStartTime
+			log.info("Orchestrator stream completed", {
+				sessionId,
+				eventCount,
+				responseLength: lastAssistantText.length,
+				durationMs: streamDurationMs,
+			})
 
 			if (lastAssistantText) {
 				const assistantMsg: SessionMessage = {
@@ -602,5 +635,21 @@ export class SessionManager {
 		const fileRefs = writtenPaths.map((p) => `- ${p}`).join("\n")
 		const prefix = `The user has attached the following files to this message (available in the workspace):\n${fileRefs}\n\n`
 		return prefix + content
+	}
+
+	/**
+	 * Look up an OpenZosma user ID by email address.
+	 *
+	 * Used by channel adapters (Slack, WhatsApp) to map external platform
+	 * users to internal accounts. The users table lives in the `auth` schema
+	 * (managed by Better Auth).
+	 *
+	 * @returns The user ID if found, or null if no matching account exists.
+	 */
+	async resolveUserByEmail(email: string): Promise<string | null> {
+		if (!this.pool) return null
+
+		const result = await this.pool.query<{ id: string }>("SELECT id FROM auth.users WHERE email = $1 LIMIT 1", [email])
+		return result.rows[0]?.id ?? null
 	}
 }

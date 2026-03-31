@@ -97,6 +97,23 @@ export function buildPolicy(opts?: {
 
 	const extraWrite = opts?.extraWritePaths ?? []
 
+	networkPolicies.local_model = {
+		name: "local_model",
+		endpoints: [
+			{
+				host: "devserver.zosma.ai",
+				port: 30080,
+				enforcement: "enforce" as const,
+			},
+			{
+				host: "*.zosma.ai",
+				port: 30080,
+				enforcement: "enforce" as const,
+			},
+		],
+		binaries: ["/usr/local/bin/node"],
+	}
+
 	return {
 		filesystem: {
 			readOnly: ["/usr", "/lib", "/lib64", "/proc", "/dev/urandom", "/app", "/etc"],

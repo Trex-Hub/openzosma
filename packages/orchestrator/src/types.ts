@@ -87,6 +87,11 @@ export interface SandboxCreateSessionRequest {
 	provider?: string
 	model?: string
 	systemPrompt?: string
+	/**
+	 * Text to prepend to the system prompt. Used by channel adapters
+	 * (e.g. Slack) to inject adapter-specific instructions.
+	 */
+	systemPromptPrefix?: string
 	toolsEnabled?: string[]
 	agentConfigId?: string
 }

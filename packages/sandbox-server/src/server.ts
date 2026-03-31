@@ -194,12 +194,19 @@ export function createSandboxApp(): Hono {
 	app.post("/sessions", async (c) => {
 		const body = await c.req.json<CreateSessionRequest>().catch(() => ({}) as CreateSessionRequest)
 
+		log.info("POST /sessions received", {
+			hasSystemPromptPrefix: !!body.systemPromptPrefix,
+			systemPromptPrefixLength: body.systemPromptPrefix?.length ?? 0,
+			systemPromptPrefixPreview: body.systemPromptPrefix?.slice(0, 80) ?? "(none)",
+		})
+
 		try {
 			const sessionId = agent.createSession({
 				sessionId: body.sessionId,
 				provider: body.provider,
 				model: body.model,
 				systemPrompt: body.systemPrompt,
+				systemPromptPrefix: body.systemPromptPrefix,
 				toolsEnabled: body.toolsEnabled,
 			})
 
@@ -261,7 +268,10 @@ export function createSandboxApp(): Hono {
 
 		return streamSSE(c, async (stream) => {
 			const abort = new AbortController()
-			stream.onAbort(() => abort.abort())
+			stream.onAbort(() => {
+				log.info("[DIAG-SSE] stream aborted by client", { sessionId })
+				abort.abort()
+			})
 
 			let body: SendMessageRequest
 			try {
@@ -276,16 +286,112 @@ export function createSandboxApp(): Hono {
 				return
 			}
 
+			log.info("Sending message to agent", { sessionId, contentLength: body.content.length })
+			const msgStartTime = Date.now()
+			const sseElapsed = (): number => Date.now() - msgStartTime
+			let eventCount = 0
+
 			try {
+				log.info("[DIAG-SSE] starting for-await on agent.sendMessage()", { sessionId })
 				for await (const event of agent.sendMessage(sessionId, body.content, abort.signal)) {
+					eventCount++
+					const ms = sseElapsed()
+
+					// Log key lifecycle events for debugging agent behavior
+					if (event.type === "turn_start") {
+						log.info("Turn started", { sessionId, eventCount, ms })
+					} else if (event.type === "message_start") {
+						log.info("Message started", { sessionId, eventCount, ms })
+					} else if (event.type === "message_end") {
+						log.info("Message ended", { sessionId, eventCount, ms })
+					} else if (event.type === "tool_call_start") {
+						const args =
+							"toolArgs" in event && typeof event.toolArgs === "string" ? event.toolArgs.slice(0, 300) : undefined
+						log.info("Tool call started", {
+							sessionId,
+							toolName: "toolName" in event ? event.toolName : undefined,
+							toolArgs: args,
+							ms,
+						})
+					} else if (event.type === "tool_call_end") {
+						const result =
+							"toolResult" in event && typeof event.toolResult === "string" ? event.toolResult.slice(0, 300) : undefined
+						log.info("Tool call ended", {
+							sessionId,
+							toolName: "toolName" in event ? event.toolName : undefined,
+							isToolError: "isToolError" in event ? event.isToolError : undefined,
+							toolResult: result,
+							ms,
+						})
+					} else if (event.type === "auto_retry_start") {
+						log.warn("LLM auto-retry started", {
+							sessionId,
+							attempt: "attempt" in event ? event.attempt : undefined,
+							maxAttempts: "maxAttempts" in event ? event.maxAttempts : undefined,
+							delayMs: "delayMs" in event ? event.delayMs : undefined,
+							error: "error" in event ? event.error : undefined,
+							ms,
+						})
+					} else if (event.type === "auto_retry_end") {
+						log.info("LLM auto-retry ended", {
+							sessionId,
+							success: "success" in event ? event.success : undefined,
+							attempt: "attempt" in event ? event.attempt : undefined,
+							error: "error" in event ? event.error : undefined,
+							ms,
+						})
+					} else if (event.type === "auto_compaction_start") {
+						log.info("Auto-compaction started", { sessionId, ms })
+					} else if (event.type === "auto_compaction_end") {
+						log.info("Auto-compaction ended", { sessionId, ms })
+					} else if (event.type === "turn_end") {
+						log.info("Turn ended", {
+							sessionId,
+							eventCount,
+							durationMs: ms,
+						})
+					} else if (event.type === "error") {
+						log.error("Agent error", {
+							sessionId,
+							error: "error" in event ? event.error : undefined,
+							eventCount,
+							durationMs: ms,
+						})
+					} else if (event.type === "file_output") {
+						log.info("File output event", { sessionId, ms })
+					}
+
+					// Diagnostic: measure how long writeSSE takes (detects backpressure)
+					const writeStart = Date.now()
 					await stream.writeSSE({
 						event: event.type,
 						data: JSON.stringify(event),
 					})
+					const writeMs = Date.now() - writeStart
+					if (writeMs > 100) {
+						log.warn("[DIAG-SSE] slow writeSSE (possible backpressure)", {
+							sessionId,
+							eventCount,
+							type: event.type,
+							writeMs,
+						})
+					}
 				}
+				log.info("[DIAG-SSE] for-await loop completed normally", {
+					sessionId,
+					eventCount,
+					durationMs: sseElapsed(),
+				})
 			} catch (err: unknown) {
+				const message = err instanceof Error ? err.message : "Unknown error"
+				log.error("[DIAG-SSE] for-await loop threw", {
+					sessionId,
+					error: message,
+					eventCount,
+					durationMs: sseElapsed(),
+					aborted: abort.signal.aborted,
+				})
 				if (!abort.signal.aborted) {
-					const message = err instanceof Error ? err.message : "Unknown error"
 					await stream.writeSSE({
 						event: "error",
 						data: JSON.stringify({ type: "error", error: message }),

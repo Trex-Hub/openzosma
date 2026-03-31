@@ -357,6 +357,23 @@ export class SandboxManager {
 				// Forward may already be active from a previous run
 			}
 
+			// Re-inject .env in case the sandbox was recreated while the
+			// orchestrator was down (e.g. OpenShell auto-recreated the pod
+			// after we deleted it, but .env injection only happens during
+			// createSandboxForRecord). This is idempotent -- overwriting
+			// an existing .env with the same values is harmless.
+			const sandboxEnv = this.buildSandboxEnv(userId, record.sandboxName, port)
+			try {
+				log.info("Re-injecting .env on reconnect", {
+					sandbox: record.sandboxName,
+					varCount: Object.keys(sandboxEnv).length,
+				})
+				await this.openshell.injectEnv(record.sandboxName, sandboxEnv)
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err)
+				log.warn("Failed to re-inject .env on reconnect (non-fatal)", { error: msg })
+			}
+
 			const state: SandboxState = {
 				userId,
 				sandboxName: record.sandboxName,
@@ -383,6 +400,20 @@ export class SandboxManager {
 				await this.openshell.forwardStart(record.sandboxName, port)
 			} catch {
 				// Forward may already be active
+			}
+
+			// Re-inject .env after the sandbox becomes ready (same rationale
+			// as the "ready" branch above).
+			const sandboxEnv = this.buildSandboxEnv(userId, record.sandboxName, port)
+			try {
+				log.info("Re-injecting .env on reconnect (was provisioning)", {
+					sandbox: record.sandboxName,
+					varCount: Object.keys(sandboxEnv).length,
+				})
+				await this.openshell.injectEnv(record.sandboxName, sandboxEnv)
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err)
+				log.warn("Failed to re-inject .env on reconnect (non-fatal)", { error: msg })
 			}
 
 			const state: SandboxState = {
@@ -428,6 +459,63 @@ export class SandboxManager {
 		return this.createSandboxForRecord(userId, record)
 	}
 
+	/**
+	 * Build the environment variable dict to inject into a sandbox.
+	 *
+	 * Includes sandbox identity vars, forwarded LLM provider keys,
+	 * and the SLACK_TOKEN remap. Called by both `createSandboxForRecord()`
+	 * and `handleExistingRecord()` (reconnection path).
+	 */
+	private buildSandboxEnv(userId: string, sandboxName: string, port: number): Record<string, string> {
+		const sandboxEnv: Record<string, string> = {
+			SANDBOX_USER_ID: userId,
+			SANDBOX_NAME: sandboxName,
+			SANDBOX_SERVER_PORT: String(port),
+			// Enable OpenAI SDK debug logging so we can see HTTP request/response
+			// details in the sandbox-server log. Remove once the hanging-LLM-call
+			// root cause is identified.
+			OPENAI_LOG: "debug",
+			// Suppress Node.js experimental warnings (e.g. UNDICI-EHPA) that
+			// pollute tool output when the agent runs agent-slack via bash.
+			NODE_NO_WARNINGS: "1",
+		}
+
+		// Forward provider keys and integration tokens from the gateway's
+		// environment. The sandbox-server uses pi-coding-agent which reads
+		// LLM keys directly; SLACK_TOKEN is consumed by the agent-slack CLI.
+		const envKeysToForward = [
+			// LLM providers
+			"OPENAI_API_KEY",
+			"ANTHROPIC_API_KEY",
+			"GOOGLE_GENERATIVE_AI_API_KEY",
+			"OPENZOSMA_MODEL_PROVIDER",
+			"OPENZOSMA_MODEL_ID",
+			"OPENZOSMA_LOCAL_MODEL_URL",
+			"OPENZOSMA_LOCAL_MODEL_ID",
+			"OPENZOSMA_LOCAL_MODEL_NAME",
+			"OPENZOSMA_LOCAL_MODEL_API_KEY",
+			"OPENZOSMA_LOCAL_MODEL_CONTEXT_WINDOW",
+			"OPENZOSMA_LOCAL_MODEL_MAX_TOKENS",
+			// Agent timeouts
+			"OPENZOSMA_LLM_IDLE_TIMEOUT_MS",
+		]
+		for (const key of envKeysToForward) {
+			const value = process.env[key]
+			if (value) {
+				sandboxEnv[key] = value
+			}
+		}
+
+		// Remap SLACK_BOT_TOKEN -> SLACK_TOKEN for the agent-slack CLI,
+		// which reads SLACK_TOKEN from the environment.
+		const slackBotToken = process.env.SLACK_BOT_TOKEN
+		if (slackBotToken) {
+			sandboxEnv.SLACK_TOKEN = slackBotToken
+		}
+
+		return sandboxEnv
+	}
+
 	private async createSandboxForRecord(userId: string, record: UserSandbox): Promise<SandboxState> {
 		const port = this.allocatePort()
 		const config: SandboxConfig = {
@@ -445,37 +533,8 @@ export class SandboxManager {
 			command: ["/bin/sh", "/app/entrypoint.sh", String(port)],
 		}
 
-		// Env vars to inject after the sandbox is running.
-		// The CLI does not support --env; we write a dotenv file post-creation.
-		// The entrypoint waits for /sandbox/.env before starting the server,
-		// so these vars (including LLM API keys) are available at boot time.
-		const sandboxEnv: Record<string, string> = {
-			SANDBOX_USER_ID: userId,
-			SANDBOX_NAME: record.sandboxName,
-			SANDBOX_SERVER_PORT: String(port),
-		}
-
-		// Forward LLM provider keys from the gateway's environment.
-		// The sandbox-server uses pi-coding-agent which reads these directly.
-		const envKeysToForward = [
-			"OPENAI_API_KEY",
-			"ANTHROPIC_API_KEY",
-			"GOOGLE_GENERATIVE_AI_API_KEY",
-			"OPENZOSMA_MODEL_PROVIDER",
-			"OPENZOSMA_MODEL_ID",
-			"OPENZOSMA_LOCAL_MODEL_URL",
-			"OPENZOSMA_LOCAL_MODEL_ID",
-			"OPENZOSMA_LOCAL_MODEL_NAME",
-			"OPENZOSMA_LOCAL_MODEL_API_KEY",
-			"OPENZOSMA_LOCAL_MODEL_CONTEXT_WINDOW",
-			"OPENZOSMA_LOCAL_MODEL_MAX_TOKENS",
-		]
-		for (const key of envKeysToForward) {
-			const value = process.env[key]
-			if (value) {
-				sandboxEnv[key] = value
-			}
-		}
+		// Build the env vars to inject after the sandbox is running.
+		const sandboxEnv = this.buildSandboxEnv(userId, record.sandboxName, port)
 
 		await userSandboxQueries.updateStatus(this.pool, record.id, "provisioning")
 

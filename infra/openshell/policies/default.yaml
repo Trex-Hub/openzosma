@@ -41,6 +41,10 @@ process:
 # OpenShell's L7 validator requires specific host patterns (bare "*" is
 # rejected). Rules are grouped by function so they can be extended or
 # removed independently.
+#
+# tls: passthrough ensures OpenShell forwards encrypted traffic as-is
+# without TLS termination/inspection. Without this, the proxy MITM can
+# break HTTP keep-alive and streaming on second sequential requests.
 # ---------------------------------------------------------------------------
 network_policies:
   llm_providers:
@@ -49,21 +53,43 @@ network_policies:
       # Anthropic
       - host: "api.anthropic.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       # OpenAI
       - host: "api.openai.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "*.openai.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       # Google Gemini
       - host: "generativelanguage.googleapis.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       # OpenRouter / local model proxies
       - host: "openrouter.ai"
         port: 443
+        tls: passthrough
+        enforcement: enforce
+    binaries:
+      - path: "/usr/local/bin/node"
+
+  # Local / self-hosted models reachable over plain HTTP.
+  # The orchestrator dynamically resolves OPENZOSMA_LOCAL_MODEL_URL at
+  # sandbox creation time and rewrites this section with the exact host
+  # and port. OpenShell only supports '*.' prefix wildcards for subdomain
+  # matching -- IP ranges and trailing wildcards are rejected.
+  local_model:
+    name: local_model
+    endpoints:
+      - host: "devserver.zosma.ai"
+        port: 30080
+        enforcement: enforce
+      - host: "*.zosma.ai"
+        port: 30080
         enforcement: enforce
     binaries:
       - path: "/usr/local/bin/node"
@@ -73,15 +99,19 @@ network_policies:
     endpoints:
       - host: "registry.npmjs.org"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "*.npmjs.org"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "pypi.org"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "files.pythonhosted.org"
         port: 443
+        tls: passthrough
         enforcement: enforce
     binaries:
       - path: "/usr/local/bin/node"
@@ -96,21 +126,44 @@ network_policies:
     endpoints:
       - host: "github.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "*.github.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "raw.githubusercontent.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "objects.githubusercontent.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
       - host: "api.github.com"
         port: 443
+        tls: passthrough
         enforcement: enforce
     binaries:
       - path: "/usr/bin/git"
       - path: "/usr/local/bin/node"
       - path: "/usr/bin/curl"
       - path: "/usr/bin/wget"
+
+  slack:
+    name: slack
+    endpoints:
+      - host: "slack.com"
+        port: 443
+        tls: passthrough
+        enforcement: enforce
+      - host: "api.slack.com"
+        port: 443
+        tls: passthrough
+        enforcement: enforce
+      - host: "*.slack.com"
+        port: 443
+        tls: passthrough
+        enforcement: enforce
+    binaries:
+      - path: "/usr/local/bin/node"
