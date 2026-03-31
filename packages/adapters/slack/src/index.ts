@@ -34,80 +34,81 @@ const MAX_MESSAGE_LENGTH = 500
  * channel. Also teaches the agent how to use the agent-slack CLI
  * to actively query Slack (channel members, search, etc.).
  */
-const SLACK_SYSTEM_PROMPT_PREFIX = `You are communicating with users through Slack. Each message you receive will be prefixed with a [Slack Context] block containing:
+const SLACK_SYSTEM_PROMPT_PREFIX = `<role>You are communicating with users through Slack.</role>
+
+<slack-context-format>
+Each message you receive will be prefixed with a <slack-context> block containing:
 - The sender's name, email, and job title
 - The channel name and topic (or "Direct Message" for DMs)
 - Previous messages in the thread for conversational context
+</slack-context-format>
 
-Important guidelines for Slack communication:
-- Address users by their first name (extracted from the context block).
+<guidelines>
+- Address users by their first name (extracted from the <slack-context> block).
 - Keep responses concise and well-structured. Use Slack-compatible markdown (bold with *text*, code with \`code\`, code blocks with \`\`\`).
-- Do not repeat information from the context block back to the user.
+- Do not repeat information from the <slack-context> block back to the user.
 - When referencing thread history, be natural about it -- do not say "I see from the thread history that...".
 - You are a helpful AI assistant. Be direct, professional, and technically accurate.
+</guidelines>
 
-## Slack CLI Tool: agent-slack
+<tool name="agent-slack">
+<description>You have the \`agent-slack\` CLI available on PATH. It is pre-authenticated via the SLACK_TOKEN environment variable. Use it via the bash tool when you need to actively query Slack for information not in the <slack-context> block.</description>
 
-You have the \`agent-slack\` CLI available on PATH. It is pre-authenticated via the SLACK_TOKEN environment variable. Use it via the bash tool when you need to actively query Slack for information not in the context block.
-
-### When to use agent-slack
+<when-to-use>
 - Listing channel members or looking up users
 - Searching messages or files across channels
 - Reading recent channel history beyond the current thread
 - Looking up user profiles or details
-- Any Slack query the user asks about that is not already in the [Slack Context] block
+- Any Slack query the user asks about that is not already in the <slack-context> block
+</when-to-use>
 
-### Common commands
+<commands title="List channel members and user info">
+  agent-slack user list --limit 100
+  agent-slack user get "@username"
+</commands>
 
-List channel members and user info:
-\`\`\`
-agent-slack user list --limit 100
-agent-slack user get "@username"
-\`\`\`
+<commands title="Browse recent channel messages">
+  agent-slack message list "general" --limit 20
+  agent-slack message list "C0123ABC" --limit 10
+</commands>
 
-Browse recent channel messages:
-\`\`\`
-agent-slack message list "general" --limit 20
-agent-slack message list "C0123ABC" --limit 10
-\`\`\`
+<commands title="Search messages">
+  agent-slack search messages "search query" --channel "general"
+  agent-slack search all "query" --channel "alerts" --after 2026-01-01
+</commands>
 
-Search messages:
-\`\`\`
-agent-slack search messages "search query" --channel "general"
-agent-slack search all "query" --channel "alerts" --after 2026-01-01
-\`\`\`
+<commands title="List channels">
+  agent-slack channel list
+  agent-slack channel list --all --limit 100
+</commands>
 
-List channels:
-\`\`\`
-agent-slack channel list
-agent-slack channel list --all --limit 100
-\`\`\`
+<commands title="Get a specific message or thread">
+  agent-slack message get "https://workspace.slack.com/archives/C123/p1700000000000000"
+  agent-slack message list "https://workspace.slack.com/archives/C123/p1700000000000000"
+</commands>
 
-Get a specific message or thread:
-\`\`\`
-agent-slack message get "https://workspace.slack.com/archives/C123/p1700000000000000"
-agent-slack message list "https://workspace.slack.com/archives/C123/p1700000000000000"
-\`\`\`
-
-Send files to the current Slack channel/thread:
-\`\`\`
-agent-slack message send "<Channel_ID>" "optional message" --attach /path/to/file
-agent-slack message send "<Channel_ID>" --attach ./report.pdf --attach ./chart.png
-\`\`\`
-- Use the Channel ID from the [Slack Context] block above.
-- For threaded replies, add --thread-ts "<Thread>" using the Thread value from the context block.
+<commands title="Send files to the current Slack channel/thread">
+  agent-slack message send "&lt;Channel_ID&gt;" "optional message" --attach /path/to/file
+  agent-slack message send "&lt;Channel_ID&gt;" --attach ./report.pdf --attach ./chart.png
+</commands>
+<file-upload-notes>
+- Use the Channel ID from the <slack-context> block above.
+- For threaded replies, add --thread-ts "&lt;Thread&gt;" using the Thread value from the context block.
 - Maximum file size: 100 MB.
 - Use multiple --attach flags to upload multiple files at once.
+</file-upload-notes>
 
-### Important rules
+<rules>
 - Output is JSON. Use \`| jq '.field'\` for filtering if needed.
 - Do NOT use python3 for post-processing, only jq.
 - Run each agent-slack command as a separate bash call (no && chains).
 - Use channel names without the # prefix (e.g. "general" not "#general").
-- Only use flags documented here or in the skill file. Do NOT invent flags -- run \`agent-slack <command> --help\` if unsure.
+- Only use flags documented here or in the skill file. Do NOT invent flags -- run \`agent-slack &lt;command&gt; --help\` if unsure.
 - \`user list\` lists ALL workspace users. It has NO \`--channel\` flag.
+</rules>
 
-For advanced commands, full flag reference, and additional examples, read the skill file at \`/app/skills/agent-slack.md\`.`
+<advanced>For advanced commands, full flag reference, and additional examples, read the skill file at \`/app/skills/agent-slack.md\`.</advanced>
+</tool>`
 
 export interface SlackAdapterConfig {
 	botToken: string
@@ -149,46 +150,58 @@ const formatTimestamp = (ts: string): string => {
 }
 
 /**
- * Build a structured context block that gets prepended to the user's
+ * Build a structured XML context block that gets prepended to the user's
  * message before sending to the agent. This gives the agent awareness
  * of who is talking, what channel they are in, and the thread history.
+ *
+ * Uses XML tags so the LLM can unambiguously parse context boundaries
+ * regardless of whether message content contains markdown.
  */
 const buildContextBlock = (context: SlackMessageContext): string => {
-	const lines: string[] = ["[Slack Context]"]
+	const lines: string[] = ["<slack-context>"]
 
-	// Sender info
-	const senderParts = [context.sender.realName]
-	if (context.sender.email) senderParts.push(`(${context.sender.email})`)
-	if (context.sender.title) senderParts.push(`- ${context.sender.title}`)
-	lines.push(`From: ${senderParts.join(" ")}`)
+	lines.push(
+		`<sender name="${escapeXml(context.sender.realName)}"${context.sender.email ? ` email="${escapeXml(context.sender.email)}"` : ""}${context.sender.title ? ` title="${escapeXml(context.sender.title)}"` : ""} />`,
+	)
 
-	// Channel info
 	if (context.channel.isDm) {
-		lines.push("Channel: Direct Message")
+		lines.push(`<channel id="${escapeXml(context.channel.channelId)}" type="dm" />`)
 	} else {
-		const channelParts = [`#${context.channel.name}`]
-		if (context.channel.topic) channelParts.push(`- ${context.channel.topic}`)
-		lines.push(`Channel: ${channelParts.join(" ")}`)
-	}
-	lines.push(`Channel ID: ${context.channel.channelId}`)
-	if (context.threadTs) {
-		lines.push(`Thread: ${context.threadTs}`)
+		lines.push(
+			`<channel name="${escapeXml(context.channel.name)}" id="${escapeXml(context.channel.channelId)}" type="channel">`,
+		)
+		if (context.channel.topic) {
+			lines.push(`<topic>${escapeXml(context.channel.topic)}</topic>`)
+		}
+		lines.push("</channel>")
 	}
 
-	// Thread history
+	if (context.threadTs) {
+		lines.push(`<thread ts="${escapeXml(context.threadTs)}">`)
+	} else {
+		lines.push("<thread>")
+	}
+
 	if (context.threadHistory.length > 0) {
-		lines.push(`Thread history (${context.threadHistory.length} previous messages):`)
+		lines.push(`<history count="${context.threadHistory.length}">`)
 		for (const msg of context.threadHistory) {
 			const time = formatTimestamp(msg.ts)
-			const prefix = msg.isBot ? `${msg.senderName} [bot]` : msg.senderName
+			const senderAttr = msg.isBot
+				? `sender="${escapeXml(msg.senderName)}" bot="true"`
+				: `sender="${escapeXml(msg.senderName)}"`
 			const text = msg.text.length > MAX_MESSAGE_LENGTH ? `${msg.text.slice(0, MAX_MESSAGE_LENGTH - 3)}...` : msg.text
-			lines.push(`  [${time}] ${prefix}: ${text}`)
+			lines.push(`<message time="${escapeXml(time)}" ${senderAttr}>${escapeXml(text)}</message>`)
 		}
+		lines.push("</history>")
 	}
 
-	lines.push("---")
+	lines.push("</thread>")
+	lines.push("</slack-context>")
 	return lines.join("\n")
 }
+
+const escapeXml = (str: string): string =>
+	str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 /**
  * Slack channel adapter using Bolt's Socket Mode.
@@ -201,7 +214,7 @@ const buildContextBlock = (context: SlackMessageContext): string => {
  * while the agent is still handling a previous one, it is queued and
  * processed after the current turn completes.
  *
- * Each message is enriched with a [Slack Context] block containing:
+ * Each message is enriched with a <slack-context> block containing:
  * - The sender's name, email, and title
  * - The channel name and topic
  * - Previous messages in the thread
