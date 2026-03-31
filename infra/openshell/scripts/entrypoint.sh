@@ -55,4 +55,7 @@ else
 fi
 
 # Start the sandbox-server (HTTP/SSE server wrapping pi-coding-agent)
-exec node /app/dist/index.js
+# Redirect stdout/stderr to a log file so we can inspect agent behavior via:
+#   kubectl exec <pod> -- cat /workspace/sandbox-server.log
+# (PID 1 is openshell-sandbox, so kubectl logs only shows its output, not ours)
+exec node /app/dist/index.js > /workspace/sandbox-server.log 2>&1

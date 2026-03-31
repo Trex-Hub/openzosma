@@ -49,6 +49,7 @@ export class OrchestratorSessionManager {
 				provider?: string
 				model?: string
 				systemPrompt?: string | null
+				systemPromptPrefix?: string
 				toolsEnabled?: string[]
 			}
 		},
@@ -67,6 +68,7 @@ export class OrchestratorSessionManager {
 			provider?: string
 			model?: string
 			systemPrompt?: string
+			systemPromptPrefix?: string
 			toolsEnabled?: string[]
 		} = {}
 
@@ -89,11 +91,19 @@ export class OrchestratorSessionManager {
 
 		// Create the session inside the sandbox via HTTP
 		const client = this.sandboxManager.getHttpClient(userId)
+
+		log.info("Orchestrator: forwarding createSession to sandbox", {
+			sessionId,
+			hasSystemPromptPrefix: !!agentConfig.systemPromptPrefix,
+			systemPromptPrefixLength: agentConfig.systemPromptPrefix?.length ?? 0,
+		})
+
 		await client.createSession({
 			sessionId,
 			provider: agentConfig.provider,
 			model: agentConfig.model,
 			systemPrompt: agentConfig.systemPrompt,
+			systemPromptPrefix: agentConfig.systemPromptPrefix,
 			toolsEnabled: agentConfig.toolsEnabled,
 			agentConfigId: opts?.agentConfigId,
 		})

@@ -1,10 +1,57 @@
 import { randomUUID } from "node:crypto"
 import type { AgentSession, AgentStreamEvent } from "@openzosma/agents"
 import { PiAgentProvider } from "@openzosma/agents"
+import { createLogger } from "@openzosma/logger"
 import { buildArtifactEvents, copyArtifactsToUserFiles, createSnapshot, detectChanges } from "./file-scanner.js"
 import type { FileSnapshot } from "./file-scanner.js"
 
+const log = createLogger({ component: "sandbox-agent" })
+
 const WORKSPACE_DIR = process.env.OPENZOSMA_WORKSPACE ?? "/workspace"
+
+/**
+ * Slack capability prompt injected into sessions when SLACK_TOKEN is
+ * available but no explicit systemPromptPrefix was provided (e.g. web
+ * dashboard sessions). Teaches the agent it can interact with Slack via
+ * the agent-slack CLI without duplicating the Slack-adapter-specific
+ * context block instructions.
+ */
+const SLACK_CAPABILITY_PROMPT = `You have Slack integration capabilities via the \`agent-slack\` CLI tool (pre-authenticated via SLACK_TOKEN environment variable). Use it via the bash tool when a user asks you to interact with Slack.
+
+### What you can do with Slack
+- List and search channels, users, and messages
+- Send messages and files to channels or threads
+- Look up user profiles and channel details
+- Search across the workspace
+
+### CRITICAL: Always use channel IDs, never bare channel names
+
+**Channel name resolution hangs indefinitely in this environment.** When sending messages, ALWAYS use the channel ID (e.g. \`C096HQPQFA4\`), never the bare channel name (e.g. \`general\` or \`openzosma\`).
+
+Workflow:
+1. Run \`agent-slack channel list\` to find the channel ID
+2. Send using the ID: \`agent-slack message send "C096HQPQFA4" "Your message"\`
+
+### Common commands
+
+\`\`\`
+agent-slack channel list
+agent-slack user list --limit 100
+agent-slack user get "@username"
+agent-slack message list "C0123ABC" --limit 20
+agent-slack message send "C0123ABC" "Hello from your AI assistant"
+agent-slack message send "C0123ABC" "Here is the report" --attach /path/to/file.pdf
+agent-slack search messages "query" --channel "C0123ABC"
+\`\`\`
+
+### Rules
+- Output is JSON. Use \`| jq '.field'\` for filtering.
+- Run each agent-slack command as a separate bash call (no && chains).
+- Use channel names without the # prefix (e.g. "general" not "#general").
+- Only use flags documented here or in the skill file. Do NOT invent flags.
+- \`user list\` lists ALL workspace users. It has NO \`--channel\` flag.
+
+For full reference, read the skill file at \`/app/skills/agent-slack.md\`.`
 
 /** Extended event type that includes file_output. */
 export type SandboxEvent =
@@ -54,15 +101,36 @@ export class SandboxAgentManager {
 
 	/**
 	 * Create a new agent session.
+	 *
+	 * If SLACK_TOKEN is available and no systemPromptPrefix was provided
+	 * by the caller, automatically injects Slack capability instructions
+	 * so all sessions (web, API, Slack) know about the agent-slack CLI.
 	 */
 	createSession(opts?: {
 		sessionId?: string
 		provider?: string
 		model?: string
 		systemPrompt?: string
+		systemPromptPrefix?: string
 		toolsEnabled?: string[]
 	}): string {
 		const sessionId = opts?.sessionId ?? randomUUID()
+
+		// Auto-inject Slack capability prompt when SLACK_TOKEN is available
+		// and the caller did not provide its own systemPromptPrefix
+		// (the Slack adapter provides its own richer prefix).
+		let effectivePrefix = opts?.systemPromptPrefix
+		if (!effectivePrefix && process.env.SLACK_TOKEN) {
+			effectivePrefix = SLACK_CAPABILITY_PROMPT
+			log.info("Auto-injecting Slack capability prompt (SLACK_TOKEN detected)", { sessionId })
+		}
+
+		log.info("SandboxAgentManager.createSession", {
+			sessionId,
+			hasSystemPromptPrefix: !!effectivePrefix,
+			systemPromptPrefixLength: effectivePrefix?.length ?? 0,
+			systemPromptPrefixPreview: effectivePrefix?.slice(0, 80) ?? "(none)",
+		})
 
 		const agentSession = this.provider.createSession({
 			sessionId,
@@ -70,6 +138,7 @@ export class SandboxAgentManager {
 			provider: opts?.provider,
 			model: opts?.model,
 			systemPrompt: opts?.systemPrompt,
+			systemPromptPrefix: effectivePrefix,
 			toolsEnabled: opts?.toolsEnabled,
 		})
 
@@ -97,18 +166,42 @@ export class SandboxAgentManager {
 		// Take initial snapshot for artifact detection
 		let snapshot = this.snapshots.get(sessionId) ?? createSnapshot(WORKSPACE_DIR)
 
+		const t0 = Date.now()
+		let yieldCount = 0
+		log.info("[DIAG-AGM] starting for-await on session.sendMessage()", { sessionId })
+
 		for await (const event of session.sendMessage(content, signal)) {
+			yieldCount++
+			if (event.type !== "message_update" && event.type !== "thinking_update" && event.type !== "tool_call_update") {
+				log.info("[DIAG-AGM] received event from PiAgentSession", {
+					sessionId,
+					yieldCount,
+					type: event.type,
+					ms: Date.now() - t0,
+				})
+			}
 			yield event
 
 			// After a tool call ends, scan for new output files
 			if (event.type === "tool_call_end") {
+				const scanStart = Date.now()
 				const result = this.scanForArtifacts(sessionId, snapshot)
+				const scanMs = Date.now() - scanStart
+				if (scanMs > 100) {
+					log.warn("[DIAG-AGM] slow artifact scan", { sessionId, scanMs })
+				}
 				if (result) {
 					snapshot = result.newSnapshot
 					yield { type: "file_output", artifacts: result.artifacts }
 				}
 			}
 		}
+
+		log.info("[DIAG-AGM] for-await loop completed", {
+			sessionId,
+			yieldCount,
+			durationMs: Date.now() - t0,
+		})
 
 		// Final scan after the turn completes to catch stragglers
 		const finalResult = this.scanForArtifacts(sessionId, snapshot)

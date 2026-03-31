@@ -97,6 +97,10 @@ COPY --from=builder /deploy ./
 
 RUN npm install -g @mariozechner/pi-coding-agent
 
+# Install agent-slack CLI so the agent can query Slack from inside the sandbox.
+# The CLI reads SLACK_TOKEN from the environment (injected via .env by the orchestrator).
+RUN npm install -g agent-slack
+
 # Copy extension manifest and install script before switching to sandbox user
 COPY packages/agents/extensions.json /tmp/extensions.json
 COPY infra/openshell/scripts/install-extensions.mjs /tmp/install-extensions.mjs
@@ -108,6 +112,11 @@ RUN chown -R sandbox:sandbox /home/sandbox/.pi/
 # Copy sandbox policies (immutable, root-owned)
 COPY infra/openshell/policies/ ./policies/
 RUN chown root:root -R ./policies/ && chmod 444 -R ./policies/
+
+# Copy skill documentation files (immutable, root-owned).
+# The agent reads these on demand to learn how to use CLI tools.
+COPY infra/openshell/skills/ ./skills/
+RUN chown root:root -R ./skills/ && chmod 444 -R ./skills/
 
 # Create workspace directory (writable, sandbox-owned)
 # This is where the user's files, code, and agent data live.

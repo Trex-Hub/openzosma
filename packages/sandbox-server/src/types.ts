@@ -10,6 +10,12 @@ export interface CreateSessionRequest {
 	model?: string
 	/** System prompt override. */
 	systemPrompt?: string
+	/**
+	 * Text to prepend to the system prompt. Used by channel adapters
+	 * (e.g. Slack) to inject adapter-specific instructions without
+	 * replacing the full system prompt.
+	 */
+	systemPromptPrefix?: string
 	/** Subset of tools to enable. */
 	toolsEnabled?: string[]
 	/** Agent config ID (for reference). */

@@ -37,10 +37,9 @@ export const initAdapters = async (sessionManager: SessionManager): Promise<Chan
 	const adapters: ChannelAdapter[] = []
 
 	if (process.env.SLACK_BOT_TOKEN) {
-		// Dynamic import: adapter-slack is an optional package. We avoid listing
-		// it as a dependency to prevent a circular build edge (adapter-slack
-		// depends on gateway for types). The cast provides type safety without
-		// requiring TS module resolution.
+		// Dynamic import keeps adapter-slack out of the gateway's compiled output.
+		// adapter-slack depends on gateway for types, but there is no circular
+		// build edge because this import is dynamic and cast at runtime.
 		const mod = (await import(/* webpackIgnore: true */ "@openzosma/adapter-slack" as string)) as {
 			SlackAdapter: new (config: SlackAdapterConfig) => ChannelAdapter
 		}
