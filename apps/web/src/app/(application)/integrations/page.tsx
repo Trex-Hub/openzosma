@@ -624,7 +624,11 @@ const IntegrationsPage = () => {
 								<CardHeader className="pb-3">
 									<div className="flex items-center justify-between">
 										<div className="flex items-center gap-2">
-											{dbinfo ? <dbinfo.Icon className="size-5 shrink-0" /> : <span className="size-5 text-muted-foreground">DB</span>}
+											{dbinfo ? (
+												<dbinfo.Icon className="size-5 shrink-0" />
+											) : (
+												<span className="size-5 text-muted-foreground">DB</span>
+											)}
 											<CardTitle className="text-base">{integration.name}</CardTitle>
 										</div>
 										<div className="flex items-center gap-2">
@@ -875,16 +879,16 @@ const IntegrationsPage = () => {
 										<div className="flex gap-2">
 											{teststate.status === "success" ? (
 												<>
-													<Button
-														variant="outline"
-														onClick={handletestconnection}
-														disabled={!isformvalid}
-													>
+													<Button variant="outline" onClick={handletestconnection} disabled={!isformvalid}>
 														<IconPlugConnected className="size-4" />
 														Re-test
 													</Button>
 													<Button onClick={handlesave} disabled={!isformvalid || saving}>
-														{saving ? <IconLoader2 className="size-4 animate-spin" /> : <IconDatabase className="size-4" />}
+														{saving ? (
+															<IconLoader2 className="size-4 animate-spin" />
+														) : (
+															<IconDatabase className="size-4" />
+														)}
 														{saving ? "Saving..." : isEditMode ? "Update Integration" : "Save Integration"}
 													</Button>
 												</>

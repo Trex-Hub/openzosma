@@ -747,4 +747,3 @@ export class SlackAdapter implements ChannelAdapter {
 		void this.drainQueue(sessionId)
 	}
 }
-

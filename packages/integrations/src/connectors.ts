@@ -151,11 +151,7 @@ export const querymysql = async (config: ConnectionConfig, query: string): Promi
 	}
 }
 
-export const executequery = async (
-	type: string,
-	config: ConnectionConfig,
-	query: string,
-): Promise<QueryResult> => {
+export const executequery = async (type: string, config: ConnectionConfig, query: string): Promise<QueryResult> => {
 	switch (type) {
 		case "postgresql":
 			return querypostgresql(config, query)
@@ -179,7 +175,12 @@ export const getschemapg = async (config: ConnectionConfig): Promise<SchemaTable
 	try {
 		const client = await pool.connect()
 		try {
-			const result = await client.query<{ table_name: string; column_name: string; data_type: string; is_nullable: string }>(
+			const result = await client.query<{
+				table_name: string
+				column_name: string
+				data_type: string
+				is_nullable: string
+			}>(
 				`SELECT t.table_name, c.column_name, c.data_type, c.is_nullable
          FROM information_schema.tables t
          JOIN information_schema.columns c ON c.table_name = t.table_name AND c.table_schema = t.table_schema

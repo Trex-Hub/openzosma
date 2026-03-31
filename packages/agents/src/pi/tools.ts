@@ -1,3 +1,4 @@
+import type { AgentToolResult } from "@mariozechner/pi-agent-core"
 import {
 	createBashTool,
 	createEditTool,
@@ -8,10 +9,9 @@ import {
 	createWriteTool,
 } from "@mariozechner/pi-coding-agent"
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent"
-import type { AgentToolResult } from "@mariozechner/pi-agent-core"
 import { integrationQueries } from "@openzosma/db"
-import { executequery, getschema, safeDecrypt } from "@openzosma/integrations"
 import type { IntegrationConfig } from "@openzosma/db"
+import { executequery, getschema, safeDecrypt } from "@openzosma/integrations"
 import { Type } from "@sinclair/typebox"
 import type pg from "pg"
 
@@ -94,8 +94,7 @@ export const createListDatabaseSchemasTool = (pool: pg.Pool): ToolDefinition => 
 		"Inspect the tables and columns of a connected database integration. " +
 		"Returns table names with their column names and data types. " +
 		"Always call this before writing a query against an unfamiliar database.",
-	promptSnippet:
-		"list_database_schemas(integration_id) — introspect tables and columns of a saved integration",
+	promptSnippet: "list_database_schemas(integration_id) — introspect tables and columns of a saved integration",
 	parameters: Type.Object({
 		integration_id: Type.String({ description: "The UUID of the database integration to inspect." }),
 	}),
