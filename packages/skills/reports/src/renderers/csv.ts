@@ -26,9 +26,9 @@ const renderTable = (headers: string[], rows: string[][]): string => {
 /**
  * Render MonthlyReportData to a CSV buffer.
  *
- * Outputs two tables separated by a blank line:
- * 1. Summary metrics (label, value)
- * 2. Per-session breakdown
+ * Outputs three sections separated by blank lines:
+ * 1. Summary metrics (label, value, unit, change)
+ * 2. One block per table defined in data.tables
  *
  * @param data - The monthly report data to render.
  * @returns A Buffer containing the UTF-8 encoded CSV content.
@@ -36,31 +36,24 @@ const renderTable = (headers: string[], rows: string[][]): string => {
 export const renderCsv = async (data: MonthlyReportData): Promise<Buffer> => {
 	const sections: string[] = []
 
-	// Summary table
+	// Section 1: metrics
 	sections.push(
 		renderTable(
-			["label", "value"],
-			[
-				["period", data.period],
-				["totalSessions", String(data.totalSessions)],
-				["totalMessages", String(data.totalMessages)],
-				["totalToolCalls", String(data.totalToolCalls)],
-			],
-		),
-	)
-
-	// Sessions table
-	sections.push(
-		renderTable(
-			["sessionId", "messageCount", "toolCallCount", "durationSeconds"],
-			data.sessions.map((s) => [
-				s.sessionId,
-				String(s.messageCount),
-				String(s.toolCallCount),
-				String(s.durationSeconds),
+			["label", "value", "unit", "change"],
+			data.metrics.map((m) => [
+				m.label,
+				String(m.value),
+				m.unit ?? "",
+				m.change !== undefined ? String(m.change) : "",
 			]),
 		),
 	)
+
+	// Section 2+: one block per table
+	for (const table of data.tables) {
+		sections.push(`# ${table.title}`)
+		sections.push(renderTable(table.headers, table.rows))
+	}
 
 	return Buffer.from(sections.join("\n\n"), "utf-8")
 }

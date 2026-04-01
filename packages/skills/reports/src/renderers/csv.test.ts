@@ -1,75 +1,98 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
+import { describe, expect, it } from "vitest"
 import type { MonthlyReportData } from "../templates/types.js"
 import { renderCsv } from "./csv.js"
 
 const baseData: MonthlyReportData = {
-	period: "March 2026",
-	totalSessions: 2,
-	totalMessages: 30,
-	totalToolCalls: 10,
-	sessions: [
-		{ sessionId: "s1", messageCount: 15, toolCallCount: 5, durationSeconds: 120 },
-		{ sessionId: "s2", messageCount: 15, toolCallCount: 5, durationSeconds: 90 },
+	title: "March 2026 Report",
+	period: { start: "2026-03-01", end: "2026-03-31" },
+	metrics: [
+		{ label: "Sessions", value: 42, unit: "count", change: 0.12 },
+		{ label: "Avg Duration", value: 95, unit: "s" },
+	],
+	charts: [],
+	tables: [
+		{
+			title: "Top Channels",
+			headers: ["Channel", "Messages"],
+			rows: [
+				["#general", "310"],
+				["#engineering", "205"],
+			],
+		},
 	],
 }
 
 describe("renderCsv", () => {
-	it("returns a Buffer", async () => {
+	it("returns a non-empty Buffer", async () => {
 		const buf = await renderCsv(baseData)
-		assert.ok(buf instanceof Buffer)
-		assert.ok(buf.length > 0)
+		expect(buf).toBeInstanceOf(Buffer)
+		expect(buf.length).toBeGreaterThan(0)
 	})
 
-	it("contains correct summary headers and values", async () => {
+	it("metrics section has correct headers and values", async () => {
 		const buf = await renderCsv(baseData)
 		const text = buf.toString("utf-8")
-		assert.ok(text.includes("label,value"))
-		assert.ok(text.includes("period,March 2026"))
-		assert.ok(text.includes("totalSessions,2"))
+		expect(text).toContain("label,value,unit,change")
+		expect(text).toContain("Sessions,42,count,0.12")
+		expect(text).toContain("Avg Duration,95,s,")
 	})
 
-	it("contains session table headers and session rows", async () => {
+	it("table section uses the table title as a comment header", async () => {
 		const buf = await renderCsv(baseData)
 		const text = buf.toString("utf-8")
-		assert.ok(text.includes("sessionId,messageCount,toolCallCount,durationSeconds"))
-		assert.ok(text.includes("s1,15,5,120"))
-		assert.ok(text.includes("s2,15,5,90"))
+		expect(text).toContain("# Top Channels")
+		expect(text).toContain("Channel,Messages")
+		expect(text).toContain("#general,310")
 	})
 
-	it("tables are separated by a blank line", async () => {
+	it("sections are separated by a blank line", async () => {
 		const buf = await renderCsv(baseData)
 		const text = buf.toString("utf-8")
-		assert.ok(text.includes("\n\n"))
+		expect(text).toContain("\n\n")
 	})
 
 	it("escapes fields containing commas", async () => {
 		const data: MonthlyReportData = {
 			...baseData,
-			period: "Jan, Feb 2026",
+			tables: [
+				{
+					title: "Test",
+					headers: ["Name"],
+					rows: [["Smith, John"]],
+				},
+			],
 		}
 		const buf = await renderCsv(data)
-		const text = buf.toString("utf-8")
-		assert.ok(text.includes('"Jan, Feb 2026"'))
+		expect(buf.toString("utf-8")).toContain('"Smith, John"')
 	})
 
 	it("escapes fields containing double-quotes", async () => {
 		const data: MonthlyReportData = {
 			...baseData,
-			period: 'He said "hello"',
+			tables: [
+				{
+					title: "Test",
+					headers: ["Name"],
+					rows: [['He said "hello"']],
+				},
+			],
 		}
 		const buf = await renderCsv(data)
-		const text = buf.toString("utf-8")
-		assert.ok(text.includes('"He said ""hello"""'))
+		expect(buf.toString("utf-8")).toContain('"He said ""hello"""')
 	})
 
 	it("escapes fields containing newlines", async () => {
 		const data: MonthlyReportData = {
 			...baseData,
-			period: "line1\nline2",
+			tables: [
+				{
+					title: "Test",
+					headers: ["Name"],
+					rows: [["line1\nline2"]],
+				},
+			],
 		}
 		const buf = await renderCsv(data)
-		const text = buf.toString("utf-8")
-		assert.ok(text.includes('"line1\nline2"'))
+		expect(buf.toString("utf-8")).toContain('"line1\nline2"')
 	})
 })

@@ -1,43 +1,39 @@
 /**
- * Template registry — maps template names to ReportTemplate instances.
+ * Template registry for the report generation skill.
  *
  * Built-in templates are registered on module load. Custom templates can be
- * added at runtime via {@link registerTemplate}.
+ * added at runtime via registerTemplate(), making this the extension point
+ * for adding templates beyond the built-in set.
  */
 
 import { MonthlyReportTemplate } from "./monthly-report.js"
 import type { ReportTemplate } from "./types.js"
 
-// biome-ignore lint/suspicious/noExplicitAny: registry stores heterogeneous templates keyed by name
-const registry = new Map<string, ReportTemplate<any>>()
+const registry = new Map<string, ReportTemplate>([[MonthlyReportTemplate.name, MonthlyReportTemplate]])
 
 /**
- * Register a template. If a template with the same name is already registered,
- * it will be overwritten.
+ * Register a report template.
  *
- * @param template - The template to register.
+ * If a template with the same name already exists it will be overwritten.
+ * Use this to add custom templates at application startup.
+ *
+ * @param template - Template to register.
  */
-export const registerTemplate = <T>(template: ReportTemplate<T>): void => {
+export const registerTemplate = (template: ReportTemplate): void => {
 	registry.set(template.name, template)
 }
 
 /**
- * Return the names and titles of all registered templates.
+ * List all registered report templates.
+ *
+ * @returns Array of all registered templates.
  */
-export const listTemplates = (): Array<{ name: string; title: string }> =>
-	[...registry.values()].map((t) => ({ name: t.name, title: t.title }))
+export const listTemplates = (): ReportTemplate[] => Array.from(registry.values())
 
 /**
  * Look up a template by name.
  *
- * @param name - The template name.
- * @returns The template, or `undefined` if not found.
+ * @param name - Template identifier, e.g. "monthly-report".
+ * @returns The template, or undefined if not found.
  */
-// biome-ignore lint/suspicious/noExplicitAny: intentional — callers must narrow the returned template
-export const getTemplate = (name: string): ReportTemplate<any> | undefined => registry.get(name)
-
-// ---------------------------------------------------------------------------
-// Built-in registrations
-// ---------------------------------------------------------------------------
-
-registerTemplate(MonthlyReportTemplate)
+export const getTemplate = (name: string): ReportTemplate | undefined => registry.get(name)

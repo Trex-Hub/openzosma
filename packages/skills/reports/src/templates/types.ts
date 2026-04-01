@@ -1,64 +1,112 @@
 /**
- * Core types for the reports skill template system.
+ * Core types for the report generation skill.
+ *
+ * MonthlyReportData is the canonical data shape accepted by the built-in
+ * monthly-report template. Custom templates may define their own shapes.
  */
+import type { TSchema } from "@sinclair/typebox"
 
-/** Supported output formats for report rendering. */
-export type ReportFormat = "pdf" | "pptx" | "xlsx"
+/** Output format supported by report templates. */
+export type ReportFormat = "pdf" | "pptx" | "csv" | "xlsx" | "png" | "svg"
 
 /** Options passed to a template renderer. */
 export interface RenderOpts {
-	/** Output format requested by the caller. */
-	format: ReportFormat
-	/** Absolute path where the rendered file should be written. */
-	outputPath: string
+	/** Directory where rendered output files are written. */
+	outputDir: string
+}
+
+/** A single dataset within a chart. */
+export interface ChartDataset {
+	/** Dataset label shown in the chart legend. */
+	label: string
+	/** Numeric data values aligned with the chart's labels array. */
+	data: number[]
+	/** Optional bar/area fill color(s). */
+	backgroundColor?: string | string[]
+	/** Optional line border color(s). */
+	borderColor?: string | string[]
+}
+
+/** A chart definition embedded in a report. */
+export interface ChartDefinition {
+	/** Chart type. */
+	type: "bar" | "line" | "pie"
+	/** Chart title displayed above the chart. */
+	title: string
+	/** X-axis / slice labels. */
+	labels: string[]
+	/** One or more datasets to plot. */
+	datasets: ChartDataset[]
+}
+
+/** A table definition embedded in a report. */
+export interface TableDefinition {
+	/** Table title displayed above the table. */
+	title: string
+	/** Column header labels. */
+	headers: string[]
+	/** Data rows — each inner array must have the same length as headers. */
+	rows: string[][]
+}
+
+/** A single summary metric row. */
+export interface MetricRow {
+	/** Human-readable metric name. */
+	label: string
+	/** Numeric value. */
+	value: number
+	/** Optional unit suffix, e.g. "%" or "ms". */
+	unit?: string
+	/** Optional period-over-period change, e.g. 0.12 for +12%. */
+	change?: number
 }
 
 /**
- * A report template that can render structured data into one or more formats.
+ * Canonical data shape for the built-in monthly-report template.
  *
- * @typeParam T - The validated data shape this template accepts.
+ * All fields except summary are required. charts and tables may be empty
+ * arrays when not applicable, but must be present.
  */
-export interface ReportTemplate<T> {
-	/** Unique machine-readable name used to look up the template. */
-	name: string
-	/** Human-readable title shown in listings. */
+export interface MonthlyReportData {
+	/** Report title. */
 	title: string
-	/** Formats this template supports. */
+	/** Reporting period. */
+	period: { start: string; end: string }
+	/** Summary metrics displayed in the metrics section. */
+	metrics: MetricRow[]
+	/** Charts to embed. Maximum 20 per render call. */
+	charts: ChartDefinition[]
+	/** Tables to embed. */
+	tables: TableDefinition[]
+	/** Optional executive summary paragraph. */
+	summary?: string
+}
+
+/**
+ * A report template definition.
+ *
+ * Register custom templates at startup via registerTemplate() from the
+ * registry module. The registry is the extension point for adding new
+ * templates beyond the built-in ones.
+ */
+export interface ReportTemplate {
+	/** Unique machine-readable name, e.g. "monthly-report". */
+	name: string
+	/** Human-readable display label. */
+	label: string
+	/** Short description of what the template produces. */
+	description: string
+	/** TypeBox schema for the data payload accepted by this template. */
+	schema: TSchema
+	/** Output formats this template supports. */
 	formats: ReportFormat[]
 	/**
-	 * Validate and parse raw input data into the typed shape T.
-	 * Should throw a descriptive error on invalid input.
+	 * Render the template to a Buffer.
+	 *
+	 * @param format - Requested output format.
+	 * @param data   - Validated template data.
+	 * @param opts   - Render options (output directory, etc.).
+	 * @returns Buffer containing the rendered output bytes.
 	 */
-	parse: (raw: unknown) => T
-	/**
-	 * Render the report data to the requested format and write the result to outputPath.
-	 * Returns the absolute path of the written file.
-	 */
-	render: (data: T, opts: RenderOpts) => Promise<string>
-}
-
-/** One row of session-level metrics for a monthly report. */
-export interface SessionMetricRow {
-	/** Session identifier. */
-	sessionId: string
-	/** Total number of messages in the session. */
-	messageCount: number
-	/** Total tool calls made during the session. */
-	toolCallCount: number
-	/** Session duration in seconds. */
-	durationSeconds: number
-}
-
-/** Aggregated data driving a monthly report. */
-export interface MonthlyReportData {
-	/** Report period label, e.g. "March 2026". */
-	period: string
-	/** Total sessions started in the period. */
-	totalSessions: number
-	/** Total messages exchanged in the period. */
-	totalMessages: number
-	/** Total tool calls in the period. */
-	totalToolCalls: number
-	/** Per-session breakdown. */
-	sessions: SessionMetricRow[]
+	render: (format: ReportFormat, data: MonthlyReportData, opts: RenderOpts) => Promise<Buffer>
 }

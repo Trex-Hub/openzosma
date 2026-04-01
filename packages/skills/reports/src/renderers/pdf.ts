@@ -13,20 +13,20 @@ const styles = StyleSheet.create({
 		color: "#222",
 	},
 	title: {
-		fontSize: 20,
+		fontSize: 22,
 		fontFamily: "Helvetica-Bold",
 		marginBottom: 4,
 	},
 	subtitle: {
-		fontSize: 13,
-		marginBottom: 16,
+		fontSize: 12,
+		marginBottom: 20,
 		color: "#555",
 	},
 	sectionHeading: {
 		fontSize: 13,
 		fontFamily: "Helvetica-Bold",
 		marginBottom: 6,
-		marginTop: 14,
+		marginTop: 16,
 	},
 	tableRow: {
 		flexDirection: "row",
@@ -34,122 +34,132 @@ const styles = StyleSheet.create({
 		borderBottomColor: "#ccc",
 		paddingVertical: 3,
 	},
-	tableHeader: {
+	tableHeaderRow: {
+		flexDirection: "row",
+		borderBottomWidth: 1,
+		borderBottomColor: "#888",
+		paddingVertical: 3,
 		fontFamily: "Helvetica-Bold",
 	},
 	cell: {
 		flex: 1,
+		fontSize: 10,
 	},
 	chart: {
 		width: 480,
 		height: 240,
-		marginBottom: 8,
+		marginBottom: 10,
 	},
-})
-
-/** Column definitions for summary metrics. */
-const METRIC_HEADERS = ["Label", "Value"]
-
-/** Build summary metrics rows from report data. */
-const metricRows = (data: MonthlyReportData): [string, string][] => [
-	["Period", data.period],
-	["Total Sessions", String(data.totalSessions)],
-	["Total Messages", String(data.totalMessages)],
-	["Total Tool Calls", String(data.totalToolCalls)],
-]
-
-/** Build a default bar chart spec from report data for the sessions overview. */
-const buildSessionsChartSpec = (data: MonthlyReportData) => ({
-	type: "bar" as const,
-	title: "Sessions Overview",
-	labels: data.sessions.map((s) => s.sessionId),
-	datasets: [
-		{
-			label: "Messages",
-			data: data.sessions.map((s) => s.messageCount),
-			backgroundColor: "rgba(54, 162, 235, 0.7)",
-		},
-		{
-			label: "Tool Calls",
-			data: data.sessions.map((s) => s.toolCallCount),
-			backgroundColor: "rgba(255, 99, 132, 0.7)",
-		},
-	],
+	summary: {
+		fontSize: 11,
+		color: "#444",
+		marginBottom: 12,
+		lineHeight: 1.5,
+	},
 })
 
 /**
  * Render MonthlyReportData to a PDF buffer using @react-pdf/renderer.
  *
  * Layout:
- *   - Title + period + summary metrics table
- *   - Sessions overview chart (embedded PNG)
- *   - Per-session breakdown table
+ *   Page 1 — title, period, optional summary, metrics table
+ *   Page 2+ — one chart image per ChartDefinition (PNG embedded)
+ *   Final — one section per TableDefinition
  *
  * @param data - The monthly report data to render.
- * @param opts - Optional render options (format, outputPath).
+ * @param opts - Render options.
  * @returns A Buffer containing the PDF binary content.
  */
 export const renderPdf = async (data: MonthlyReportData, _opts?: RenderOpts): Promise<Buffer> => {
-	// Pre-render chart to PNG buffer and encode as base64 data URI
-	const chartBuf = await renderChart(buildSessionsChartSpec(data))
-	const chartDataUri = `data:image/png;base64,${chartBuf.toString("base64")}`
-
-	const doc = React.createElement(
-		Document,
-		null,
-		React.createElement(
-			Page,
-			{ size: "A4", style: styles.page },
-			// Title
-			React.createElement(Text, { style: styles.title }, "Monthly Report"),
-			React.createElement(Text, { style: styles.subtitle }, data.period),
-			// Summary metrics
-			React.createElement(Text, { style: styles.sectionHeading }, "Summary"),
-			React.createElement(
-				View,
-				null,
-				React.createElement(
-					View,
-					{ style: { ...styles.tableRow, ...styles.tableHeader } },
-					...METRIC_HEADERS.map((h) => React.createElement(Text, { key: h, style: styles.cell }, h)),
-				),
-				...metricRows(data).map(([label, value]) =>
-					React.createElement(
-						View,
-						{ key: label, style: styles.tableRow },
-						React.createElement(Text, { style: styles.cell }, label),
-						React.createElement(Text, { style: styles.cell }, value),
-					),
-				),
-			),
-			// Chart section
-			React.createElement(Text, { style: styles.sectionHeading }, "Sessions Overview"),
-			React.createElement(Image, { src: chartDataUri, style: styles.chart }),
-			// Sessions table
-			React.createElement(Text, { style: styles.sectionHeading }, "Session Breakdown"),
-			React.createElement(
-				View,
-				null,
-				React.createElement(
-					View,
-					{ style: { ...styles.tableRow, ...styles.tableHeader } },
-					...["Session ID", "Messages", "Tool Calls", "Duration (s)"].map((h) =>
-						React.createElement(Text, { key: h, style: styles.cell }, h),
-					),
-				),
-				...data.sessions.map((s) =>
-					React.createElement(
-						View,
-						{ key: s.sessionId, style: styles.tableRow },
-						React.createElement(Text, { style: styles.cell }, s.sessionId),
-						React.createElement(Text, { style: styles.cell }, String(s.messageCount)),
-						React.createElement(Text, { style: styles.cell }, String(s.toolCallCount)),
-						React.createElement(Text, { style: styles.cell }, String(s.durationSeconds)),
-					),
-				),
-			),
-		),
+	// Pre-render all charts to base64 PNG data URIs
+	const chartUris: string[] = await Promise.all(
+		data.charts.map(async (chart) => {
+			const buf = await renderChart(chart)
+			return `data:image/png;base64,${buf.toString("base64")}`
+		}),
 	)
 
+	const children: React.ReactElement[] = []
+
+	// --- Page 1: title + metrics ---
+	const page1Rows: React.ReactElement[] = [
+		React.createElement(Text, { key: "title", style: styles.title }, data.title),
+		React.createElement(Text, { key: "period", style: styles.subtitle }, `${data.period.start} — ${data.period.end}`),
+	]
+
+	if (data.summary) {
+		page1Rows.push(React.createElement(Text, { key: "summary", style: styles.summary }, data.summary))
+	}
+
+	if (data.metrics.length > 0) {
+		page1Rows.push(React.createElement(Text, { key: "metricsHeading", style: styles.sectionHeading }, "Metrics"))
+
+		const metricHeaderRow = React.createElement(
+			View,
+			{ key: "metricHeader", style: styles.tableHeaderRow },
+			React.createElement(Text, { style: styles.cell }, "Metric"),
+			React.createElement(Text, { style: styles.cell }, "Value"),
+			React.createElement(Text, { style: styles.cell }, "Unit"),
+			React.createElement(Text, { style: styles.cell }, "Change"),
+		)
+
+		const metricDataRows = data.metrics.map((m, i) =>
+			React.createElement(
+				View,
+				{ key: `m${i}`, style: styles.tableRow },
+				React.createElement(Text, { style: styles.cell }, m.label),
+				React.createElement(Text, { style: styles.cell }, String(m.value)),
+				React.createElement(Text, { style: styles.cell }, m.unit ?? ""),
+				React.createElement(Text, { style: styles.cell }, m.change !== undefined ? String(m.change) : ""),
+			),
+		)
+
+		page1Rows.push(
+			React.createElement(View, { key: "metricsTable" }, metricHeaderRow, ...metricDataRows),
+		)
+	}
+
+	children.push(React.createElement(Page, { key: "p1", size: "A4", style: styles.page }, ...page1Rows))
+
+	// --- Chart pages ---
+	for (let i = 0; i < data.charts.length; i++) {
+		const chart = data.charts[i]
+		const uri = chartUris[i]
+		children.push(
+			React.createElement(
+				Page,
+				{ key: `chart${i}`, size: "A4", style: styles.page },
+				React.createElement(Text, { style: styles.sectionHeading }, chart.title),
+				React.createElement(Image, { src: uri, style: styles.chart }),
+			),
+		)
+	}
+
+	// --- Table pages ---
+	for (let t = 0; t < data.tables.length; t++) {
+		const table = data.tables[t]
+		const headerRow = React.createElement(
+			View,
+			{ key: "th", style: styles.tableHeaderRow },
+			...table.headers.map((h, hi) => React.createElement(Text, { key: hi, style: styles.cell }, h)),
+		)
+		const dataRows = table.rows.map((row, ri) =>
+			React.createElement(
+				View,
+				{ key: `r${ri}`, style: styles.tableRow },
+				...row.map((cell, ci) => React.createElement(Text, { key: ci, style: styles.cell }, cell)),
+			),
+		)
+		children.push(
+			React.createElement(
+				Page,
+				{ key: `table${t}`, size: "A4", style: styles.page },
+				React.createElement(Text, { style: styles.sectionHeading }, table.title),
+				React.createElement(View, { key: "tableBody" }, headerRow, ...dataRows),
+			),
+		)
+	}
+
+	const doc = React.createElement(Document, null, ...children)
 	return renderToBuffer(doc)
 }

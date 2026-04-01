@@ -1,5 +1,4 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
+import { describe, expect, it } from "vitest"
 import { renderChart } from "./chart.js"
 
 describe("renderChart", () => {
@@ -17,12 +16,12 @@ describe("renderChart", () => {
 			],
 		})
 
-		assert.ok(buf instanceof Buffer, "result should be a Buffer")
+		expect(buf).toBeInstanceOf(Buffer)
 		// PNG magic bytes: \x89PNG
-		assert.equal(buf[0], 0x89)
-		assert.equal(buf[1], 0x50) // P
-		assert.equal(buf[2], 0x4e) // N
-		assert.equal(buf[3], 0x47) // G
+		expect(buf[0]).toBe(0x89)
+		expect(buf[1]).toBe(0x50) // P
+		expect(buf[2]).toBe(0x4e) // N
+		expect(buf[3]).toBe(0x47) // G
 	})
 
 	it("renders a line chart", async () => {
@@ -32,8 +31,8 @@ describe("renderChart", () => {
 			labels: ["Q1", "Q2"],
 			datasets: [{ label: "Value", data: [5, 10] }],
 		})
-		assert.ok(buf instanceof Buffer)
-		assert.ok(buf.length > 0)
+		expect(buf).toBeInstanceOf(Buffer)
+		expect(buf.length).toBeGreaterThan(0)
 	})
 
 	it("renders a pie chart", async () => {
@@ -43,7 +42,7 @@ describe("renderChart", () => {
 			labels: ["A", "B"],
 			datasets: [{ label: "Share", data: [60, 40] }],
 		})
-		assert.ok(buf instanceof Buffer)
-		assert.ok(buf.length > 0)
+		expect(buf).toBeInstanceOf(Buffer)
+		expect(buf.length).toBeGreaterThan(0)
 	})
 })

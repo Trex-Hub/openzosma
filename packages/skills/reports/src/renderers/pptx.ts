@@ -14,36 +14,21 @@ const PptxGenJS = require("pptxgenjs") as new () => {
 	write(opts: { outputType: string }): Promise<unknown>
 }
 
-/** Build a sessions overview chart spec from report data. */
-const buildSessionsChartSpec = (data: MonthlyReportData) => ({
-	type: "bar" as const,
-	title: "Sessions Overview",
-	labels: data.sessions.map((s) => s.sessionId),
-	datasets: [
-		{
-			label: "Messages",
-			data: data.sessions.map((s) => s.messageCount),
-			backgroundColor: "rgba(54, 162, 235, 0.7)",
-		},
-		{
-			label: "Tool Calls",
-			data: data.sessions.map((s) => s.toolCallCount),
-			backgroundColor: "rgba(255, 99, 132, 0.7)",
-		},
-	],
-})
+type PptxRow = { text: string; options?: { bold?: boolean } }[]
 
 /**
  * Render MonthlyReportData to a PowerPoint (PPTX) buffer using pptxgenjs.
  *
  * Slide layout:
  *   1. Title slide — report title + period
- *   2. Summary metrics slide — label/value table
- *   3. Sessions overview chart slide — embedded PNG
- *   4. Session breakdown table slide
+ *   2. Metrics slide — label/value/unit/change table
+ *   3+. One slide per chart (PNG embedded via addImage)
+ *   N+. One slide per table
+ *
+ * Charts are rendered via chartjs-node-canvas → PNG buffer → base64 → addImage.
  *
  * @param data - The monthly report data to render.
- * @param opts - Optional render options (format, outputPath).
+ * @param opts - Render options.
  * @returns A Buffer containing the PPTX binary content.
  */
 export const renderPptx = async (data: MonthlyReportData, _opts?: RenderOpts): Promise<Buffer> => {
@@ -52,7 +37,7 @@ export const renderPptx = async (data: MonthlyReportData, _opts?: RenderOpts): P
 
 	// --- Slide 1: Title ---
 	const titleSlide = pptx.addSlide()
-	titleSlide.addText("Monthly Report", {
+	titleSlide.addText(data.title, {
 		x: 0.5,
 		y: 1.5,
 		w: 9,
@@ -61,97 +46,91 @@ export const renderPptx = async (data: MonthlyReportData, _opts?: RenderOpts): P
 		bold: true,
 		align: "center",
 	})
-	titleSlide.addText(data.period, {
+	titleSlide.addText(`${data.period.start} — ${data.period.end}`, {
 		x: 0.5,
 		y: 2.9,
 		w: 9,
 		h: 0.7,
-		fontSize: 24,
+		fontSize: 20,
 		align: "center",
 		color: "555555",
 	})
 
-	// --- Slide 2: Summary Metrics ---
-	const metricsSlide = pptx.addSlide()
-	metricsSlide.addText("Summary Metrics", {
-		x: 0.5,
-		y: 0.3,
-		w: 9,
-		h: 0.6,
-		fontSize: 20,
-		bold: true,
-	})
-	metricsSlide.addTable(
-		[
-			[
-				{ text: "Label", options: { bold: true } },
-				{ text: "Value", options: { bold: true } },
-			],
-			[{ text: "Period" }, { text: data.period }],
-			[{ text: "Total Sessions" }, { text: String(data.totalSessions) }],
-			[{ text: "Total Messages" }, { text: String(data.totalMessages) }],
-			[{ text: "Total Tool Calls" }, { text: String(data.totalToolCalls) }],
-		],
-		{ x: 0.5, y: 1.1, w: 9, colW: [4.5, 4.5], fontSize: 14 },
-	)
+	if (data.summary) {
+		titleSlide.addText(data.summary, {
+			x: 0.5,
+			y: 3.8,
+			w: 9,
+			h: 1.2,
+			fontSize: 14,
+			align: "center",
+			color: "444444",
+		})
+	}
 
-	// --- Slide 3: Chart ---
-	const chartBuf = await renderChart(buildSessionsChartSpec(data))
-	const chartBase64 = chartBuf.toString("base64")
+	// --- Slide 2: Metrics ---
+	if (data.metrics.length > 0) {
+		const metricsSlide = pptx.addSlide()
+		metricsSlide.addText("Metrics", { x: 0.5, y: 0.3, w: 9, h: 0.6, fontSize: 20, bold: true })
 
-	const chartSlide = pptx.addSlide()
-	chartSlide.addText("Sessions Overview", {
-		x: 0.5,
-		y: 0.3,
-		w: 9,
-		h: 0.6,
-		fontSize: 20,
-		bold: true,
-	})
-	chartSlide.addImage({
-		data: `image/png;base64,${chartBase64}`,
-		x: 0.5,
-		y: 1.1,
-		w: 9,
-		h: 4.5,
-	})
+		const headerRow: PptxRow = [
+			{ text: "Metric", options: { bold: true } },
+			{ text: "Value", options: { bold: true } },
+			{ text: "Unit", options: { bold: true } },
+			{ text: "Change", options: { bold: true } },
+		]
 
-	// --- Slide 4: Session Breakdown Table ---
-	const tableSlide = pptx.addSlide()
-	tableSlide.addText("Session Breakdown", {
-		x: 0.5,
-		y: 0.3,
-		w: 9,
-		h: 0.6,
-		fontSize: 20,
-		bold: true,
-	})
+		const metricRows: PptxRow[] = data.metrics.map((m) => [
+			{ text: m.label },
+			{ text: String(m.value) },
+			{ text: m.unit ?? "" },
+			{ text: m.change !== undefined ? String(m.change) : "" },
+		])
 
-	type TableRow = { text?: string; options?: { bold?: boolean } }[]
-	const tableRows: TableRow[] = [
-		[
-			{ text: "Session ID", options: { bold: true } },
-			{ text: "Messages", options: { bold: true } },
-			{ text: "Tool Calls", options: { bold: true } },
-			{ text: "Duration (s)", options: { bold: true } },
-		],
-		...data.sessions.map(
-			(s): TableRow => [
-				{ text: s.sessionId },
-				{ text: String(s.messageCount) },
-				{ text: String(s.toolCallCount) },
-				{ text: String(s.durationSeconds) },
-			],
-		),
-	]
+		metricsSlide.addTable([headerRow, ...metricRows], {
+			x: 0.5,
+			y: 1.1,
+			w: 9,
+			colW: [3, 2, 2, 2],
+			fontSize: 13,
+		})
+	}
 
-	tableSlide.addTable(tableRows, {
-		x: 0.5,
-		y: 1.1,
-		w: 9,
-		colW: [2.5, 2, 2, 2.5],
-		fontSize: 12,
-	})
+	// --- Chart slides: one per chart ---
+	for (const chart of data.charts) {
+		const chartBuf = await renderChart(chart)
+		const chartBase64 = chartBuf.toString("base64")
+
+		const chartSlide = pptx.addSlide()
+		chartSlide.addText(chart.title, { x: 0.5, y: 0.3, w: 9, h: 0.6, fontSize: 20, bold: true })
+		chartSlide.addImage({
+			data: `image/png;base64,${chartBase64}`,
+			x: 0.5,
+			y: 1.1,
+			w: 9,
+			h: 4.5,
+		})
+	}
+
+	// --- Table slides: one per table ---
+	for (const table of data.tables) {
+		const tableSlide = pptx.addSlide()
+		tableSlide.addText(table.title, { x: 0.5, y: 0.3, w: 9, h: 0.6, fontSize: 20, bold: true })
+
+		const headerRow: PptxRow = table.headers.map((h) => ({ text: h, options: { bold: true } }))
+		const dataRows: PptxRow[] = table.rows.map((row) => row.map((cell) => ({ text: cell })))
+
+		const colCount = table.headers.length
+		const colW = Array(colCount).fill(9 / colCount) as number[]
+
+		tableSlide.addTable([headerRow, ...dataRows], {
+			x: 0.5,
+			y: 1.1,
+			w: 9,
+			colW,
+			fontSize: 12,
+		})
+	}
 
 	const result = await pptx.write({ outputType: "nodebuffer" })
 	return result as Buffer

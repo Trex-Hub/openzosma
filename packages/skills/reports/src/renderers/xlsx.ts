@@ -5,11 +5,11 @@ import type { MonthlyReportData, RenderOpts } from "../templates/types.js"
  * Render MonthlyReportData to an Excel (XLSX) buffer using exceljs.
  *
  * Sheet layout:
- *   - Sheet "Metrics": columns label, value (summary metrics)
- *   - Sheet "Sessions": columns sessionId, messageCount, toolCallCount, durationSeconds
+ *   - Sheet "Metrics": label, value, unit, change columns
+ *   - One sheet per table in data.tables, using the table title as the sheet name
  *
  * @param data - The monthly report data to render.
- * @param opts - Optional render options (format, outputPath).
+ * @param opts - Render options.
  * @returns A Buffer containing the XLSX binary content.
  */
 export const renderXlsx = async (data: MonthlyReportData, _opts?: RenderOpts): Promise<Buffer> => {
@@ -18,41 +18,47 @@ export const renderXlsx = async (data: MonthlyReportData, _opts?: RenderOpts): P
 	// --- Sheet 1: Metrics ---
 	const metricsSheet = workbook.addWorksheet("Metrics")
 	metricsSheet.columns = [
-		{ header: "label", key: "label", width: 24 },
+		{ header: "label", key: "label", width: 28 },
 		{ header: "value", key: "value", width: 20 },
-		{ header: "unit", key: "unit", width: 16 },
-		{ header: "change", key: "change", width: 16 },
+		{ header: "unit", key: "unit", width: 14 },
+		{ header: "change", key: "change", width: 14 },
 	]
-	// Style header row
 	const metricsHeader = metricsSheet.getRow(1)
 	metricsHeader.font = { bold: true }
 	metricsHeader.commit()
 
-	// Summary rows
-	metricsSheet.addRow({ label: "period", value: data.period, unit: "", change: "" })
-	metricsSheet.addRow({ label: "totalSessions", value: data.totalSessions, unit: "sessions", change: "" })
-	metricsSheet.addRow({ label: "totalMessages", value: data.totalMessages, unit: "messages", change: "" })
-	metricsSheet.addRow({ label: "totalToolCalls", value: data.totalToolCalls, unit: "calls", change: "" })
-
-	// --- Sheet 2: Sessions ---
-	const sessionsSheet = workbook.addWorksheet("Sessions")
-	sessionsSheet.columns = [
-		{ header: "sessionId", key: "sessionId", width: 28 },
-		{ header: "messageCount", key: "messageCount", width: 16 },
-		{ header: "toolCallCount", key: "toolCallCount", width: 16 },
-		{ header: "durationSeconds", key: "durationSeconds", width: 18 },
-	]
-	const sessionsHeader = sessionsSheet.getRow(1)
-	sessionsHeader.font = { bold: true }
-	sessionsHeader.commit()
-
-	for (const s of data.sessions) {
-		sessionsSheet.addRow({
-			sessionId: s.sessionId,
-			messageCount: s.messageCount,
-			toolCallCount: s.toolCallCount,
-			durationSeconds: s.durationSeconds,
+	for (const m of data.metrics) {
+		metricsSheet.addRow({
+			label: m.label,
+			value: m.value,
+			unit: m.unit ?? "",
+			change: m.change ?? "",
 		})
+	}
+
+	// --- One sheet per table ---
+	for (const table of data.tables) {
+		// Excel sheet names max 31 chars, strip invalid chars
+		const sheetName = table.title.replace(/[[\]\\/*?:]/g, "").slice(0, 31)
+		const sheet = workbook.addWorksheet(sheetName)
+
+		sheet.columns = table.headers.map((h) => ({
+			header: h,
+			key: h,
+			width: Math.max(h.length + 4, 14),
+		}))
+
+		const headerRow = sheet.getRow(1)
+		headerRow.font = { bold: true }
+		headerRow.commit()
+
+		for (const row of table.rows) {
+			const rowObj: Record<string, string> = {}
+			table.headers.forEach((h, i) => {
+				rowObj[h] = row[i] ?? ""
+			})
+			sheet.addRow(rowObj)
+		}
 	}
 
 	const arrayBuffer = await workbook.xlsx.writeBuffer()

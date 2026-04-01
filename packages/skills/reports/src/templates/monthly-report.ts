@@ -1,61 +1,84 @@
 /**
- * Monthly report template — TypeBox schema + render dispatcher.
+ * Built-in monthly report template.
  *
- * Renderers (PDF, PPTX, XLSX) are implemented in sibling packages and will
- * be wired in once the renderer tasks are merged. Until then, render() stubs
- * each format so the registry and tool layer can be built and tested independently.
+ * Accepts MonthlyReportData, validates it via TypeBox, and dispatches
+ * rendering to format-specific renderers.
  */
 
-import { type Static, Type } from "@sinclair/typebox"
-import { Value } from "@sinclair/typebox/value"
-import type { MonthlyReportData, RenderOpts, ReportTemplate } from "./types.js"
+import { Type } from "@sinclair/typebox"
+import { renderCsv } from "../renderers/csv.js"
+import { renderPdf } from "../renderers/pdf.js"
+import { renderPptx } from "../renderers/pptx.js"
+import { renderXlsx } from "../renderers/xlsx.js"
+import type { MonthlyReportData, RenderOpts, ReportFormat, ReportTemplate } from "./types.js"
 
 // ---------------------------------------------------------------------------
-// TypeBox schema
+// TypeBox schema (mirrors the MonthlyReportData interface in types.ts)
 // ---------------------------------------------------------------------------
 
-const SessionMetricRowSchema = Type.Object({
-	sessionId: Type.String(),
-	messageCount: Type.Number({ minimum: 0 }),
-	toolCallCount: Type.Number({ minimum: 0 }),
-	durationSeconds: Type.Number({ minimum: 0 }),
+const MetricRowSchema = Type.Object({
+	label: Type.String(),
+	value: Type.Number(),
+	unit: Type.Optional(Type.String()),
+	change: Type.Optional(Type.Number()),
 })
 
-/** TypeBox schema for {@link MonthlyReportData}. */
+const ChartDatasetSchema = Type.Object({
+	label: Type.String(),
+	data: Type.Array(Type.Number()),
+	backgroundColor: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())])),
+	borderColor: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())])),
+})
+
+const ChartDefinitionSchema = Type.Object({
+	type: Type.Union([Type.Literal("bar"), Type.Literal("line"), Type.Literal("pie")]),
+	title: Type.String(),
+	labels: Type.Array(Type.String()),
+	datasets: Type.Array(ChartDatasetSchema),
+})
+
+const TableDefinitionSchema = Type.Object({
+	title: Type.String(),
+	headers: Type.Array(Type.String()),
+	rows: Type.Array(Type.Array(Type.String())),
+})
+
+/** TypeBox schema for {@link MonthlyReportData}. Exported for use by the tool layer. */
 export const MonthlyReportDataSchema = Type.Object({
-	period: Type.String({ minLength: 1 }),
-	totalSessions: Type.Number({ minimum: 0 }),
-	totalMessages: Type.Number({ minimum: 0 }),
-	totalToolCalls: Type.Number({ minimum: 0 }),
-	sessions: Type.Array(SessionMetricRowSchema),
+	title: Type.String({ minLength: 1 }),
+	period: Type.Object({
+		start: Type.String({ minLength: 1 }),
+		end: Type.String({ minLength: 1 }),
+	}),
+	metrics: Type.Array(MetricRowSchema),
+	charts: Type.Array(ChartDefinitionSchema),
+	tables: Type.Array(TableDefinitionSchema),
+	summary: Type.Optional(Type.String()),
 })
-
-/** Inferred static type from the TypeBox schema (matches MonthlyReportData). */
-export type MonthlyReportDataSchema = Static<typeof MonthlyReportDataSchema>
 
 // ---------------------------------------------------------------------------
 // Renderer dispatcher
 // ---------------------------------------------------------------------------
 
-/**
- * Dispatch render to the appropriate format renderer.
- * Renderer implementations are injected at runtime once the renderer packages
- * are available; until then, each branch throws a "not yet implemented" error.
- */
-const renderMonthlyReport = async (_data: MonthlyReportData, opts: RenderOpts): Promise<string> => {
-	switch (opts.format) {
+const renderMonthlyReport = async (
+	format: ReportFormat,
+	data: MonthlyReportData,
+	opts: RenderOpts,
+): Promise<Buffer> => {
+	switch (format) {
 		case "pdf":
-			// TODO: import and call PDF renderer once packages/skills/reports/src/renderers/pdf.tsx is merged
-			throw new Error("PDF renderer not yet wired — pending renderer task merge")
+			return renderPdf(data, opts)
 		case "pptx":
-			// TODO: import and call PPTX renderer once packages/skills/reports/src/renderers/pptx.ts is merged
-			throw new Error("PPTX renderer not yet wired — pending renderer task merge")
+			return renderPptx(data, opts)
+		case "csv":
+			return renderCsv(data)
 		case "xlsx":
-			// TODO: import and call XLSX renderer once packages/skills/reports/src/renderers/xlsx.ts is merged
-			throw new Error("XLSX renderer not yet wired — pending renderer task merge")
+			return renderXlsx(data, opts)
+		case "png":
+		case "svg":
+			throw new Error(`Format '${format}' is not supported by the monthly-report template directly. Use report_execute_code to generate charts as standalone image files.`)
 		default: {
-			// Exhaustiveness check
-			const _exhaustive: never = opts.format
+			const _exhaustive: never = format
 			throw new Error(`Unsupported format: ${String(_exhaustive)}`)
 		}
 	}
@@ -65,23 +88,14 @@ const renderMonthlyReport = async (_data: MonthlyReportData, opts: RenderOpts): 
 // Template definition
 // ---------------------------------------------------------------------------
 
-/**
- * Monthly report template.
- * Validates input via TypeBox and dispatches rendering to format-specific renderers.
- */
-export const MonthlyReportTemplate: ReportTemplate<MonthlyReportData> = {
+/** Built-in monthly report template. */
+export const MonthlyReportTemplate: ReportTemplate = {
 	name: "monthly-report",
-	title: "Monthly Activity Report",
-	formats: ["pdf", "pptx", "xlsx"],
-
-	parse: (raw: unknown): MonthlyReportData => {
-		if (!Value.Check(MonthlyReportDataSchema, raw)) {
-			const errors = [...Value.Errors(MonthlyReportDataSchema, raw)]
-			const summary = errors.map((e) => `${e.path}: ${e.message}`).join("; ")
-			throw new Error(`Invalid MonthlyReportData: ${summary}`)
-		}
-		return raw as MonthlyReportData
-	},
-
+	label: "Monthly Report",
+	description:
+		"A structured monthly report with summary metrics, embedded charts, and data tables. " +
+		"Supports PDF, PPTX, CSV, and XLSX output formats.",
+	schema: MonthlyReportDataSchema,
+	formats: ["pdf", "pptx", "csv", "xlsx"],
 	render: renderMonthlyReport,
 }
