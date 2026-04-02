@@ -1,7 +1,27 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+// Mock chartjs-node-canvas before importing renderChart so the native canvas
+// binary is never loaded. CI runners do not have the system libraries (Cairo,
+// libpng) required to compile canvas@2.x, causing a hard module-not-found
+// error when the real binding is required.
+vi.mock("chartjs-node-canvas", () => {
+	const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+	const ChartJSNodeCanvas = vi.fn().mockImplementation(() => ({
+		renderToBuffer: vi.fn().mockResolvedValue(PNG_HEADER),
+		renderToBufferSync: vi.fn().mockReturnValue(Buffer.from("<svg/>", "utf-8")),
+	}))
+
+	return { ChartJSNodeCanvas }
+})
+
 import { renderChart } from "./chart.js"
 
 describe("renderChart", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
 	it("renders a bar chart and returns a Buffer with PNG magic bytes", async () => {
 		const buf = await renderChart({
 			type: "bar",
@@ -44,5 +64,19 @@ describe("renderChart", () => {
 		})
 		expect(buf).toBeInstanceOf(Buffer)
 		expect(buf.length).toBeGreaterThan(0)
+	})
+
+	it("renders an SVG when format is svg", async () => {
+		const buf = await renderChart(
+			{
+				type: "bar",
+				title: "SVG Chart",
+				labels: ["X"],
+				datasets: [{ label: "Y", data: [1] }],
+			},
+			"svg",
+		)
+		expect(buf).toBeInstanceOf(Buffer)
+		expect(buf.toString()).toContain("<svg")
 	})
 })
