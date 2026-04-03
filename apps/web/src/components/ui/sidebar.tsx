@@ -73,16 +73,11 @@ export const Sidebar = ({
 }
 
 export const SidebarBody = (props: React.ComponentProps<typeof motion.div>) => {
-	return (
-		<>
-			<DesktopSidebar {...props} />
-			<MobileSidebar {...(props as React.ComponentProps<"div">)} />
-		</>
-	)
+	return <DesktopSidebar {...props} />
 }
 
 export const DesktopSidebar = ({ className, children, ...props }: React.ComponentProps<typeof motion.div>) => {
-	const { open, animate, setHovered } = useSidebar()
+	const { open, animate } = useSidebar()
 
 	return (
 		<motion.div
@@ -91,16 +86,9 @@ export const DesktopSidebar = ({ className, children, ...props }: React.Componen
 				className,
 			)}
 			animate={{
-				// Width is determined solely by open state — no hover expansion
 				width: animate ? (open ? "300px" : "60px") : "300px",
 			}}
 			transition={{ duration: 0.2, ease: "easeOut" }}
-			onMouseEnter={() => {
-				if (!open) setHovered(true)
-			}}
-			onMouseLeave={() => {
-				if (!open) setHovered(false)
-			}}
 			{...props}
 		>
 			{children}

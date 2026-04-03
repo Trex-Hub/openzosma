@@ -1,249 +1,255 @@
 "use client"
+
 import ThemeSwitch from "@/src/components/molecules/theme-switch"
 import ChatSidebar from "@/src/components/organisms/chat-sidebar"
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/src/components/ui/alert-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/src/components/ui/avatar"
-// COMPONENTS
 import { Sidebar as RootSidebar, SidebarBody, SidebarLink, useSidebar } from "@/src/components/ui/sidebar"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/src/components/ui/tooltip"
 import { useSession } from "@/src/lib/auth-client"
-// STORE
+import { cn } from "@/src/lib/utils"
 import { useSidebarStore } from "@/src/stores/sidebar-store"
-// LINKS
 import { getSidebarItems } from "@/src/utils/sidebar-items"
-// ICONS
-import { IconChevronRight, IconMenu2 } from "@tabler/icons-react"
-// MOTION
+import { IconChevronLeft, IconChevronRight, IconLogout } from "@tabler/icons-react"
 import { AnimatePresence, motion } from "motion/react"
-// NEXT
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-// HOOKS
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 
-// Inner component — rendered inside SidebarProvider so useSidebar() works
-const SidebarContent = ({
-	collapsed,
-	togglecollapsed,
-}: {
+// ---------------------------------------------------------------------------
+// SidebarContent
+// ---------------------------------------------------------------------------
+
+interface SidebarContentProps {
 	collapsed: boolean
-	togglecollapsed: () => void
-}) => {
-	// hovered is just for the expand arrow hint — NOT for auto-expanding
-	const { hovered } = useSidebar()
+	threadpanelopen: boolean
+	setthreadpanelopen: (open: boolean) => void
+}
 
+const SidebarContent = ({ collapsed, threadpanelopen, setthreadpanelopen }: SidebarContentProps) => {
+	const { open } = useSidebar()
 	const { data } = useSession()
 	const { user } = data ?? {}
 	const { name, image } = user ?? {}
 	const pathname = usePathname()
 	const sidebarItems = getSidebarItems()
+	const [signoutopen, setsignoutopen] = useState(false)
 
-	// ── Chat flyout state with 300ms open debounce ──
-	const [chatflyoutopen, setChatflyoutopen] = useState(false)
-	const flyoutopentimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-	const flyoutclosetimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-	const chatitemref = useRef<HTMLDivElement>(null)
-	const flyoutref = useRef<HTMLDivElement>(null)
-
-	const openflyout = useCallback(() => {
-		// Cancel any pending close
-		if (flyoutclosetimeout.current) clearTimeout(flyoutclosetimeout.current)
-		// Open after 300ms debounce
-		if (!chatflyoutopen) {
-			flyoutopentimeout.current = setTimeout(() => {
-				setChatflyoutopen(true)
-			}, 300)
-		}
-	}, [chatflyoutopen])
-
-	const closeflyout = useCallback(() => {
-		// Cancel any pending open
-		if (flyoutopentimeout.current) clearTimeout(flyoutopentimeout.current)
-		// Close after short delay so user can move to the flyout panel
-		flyoutclosetimeout.current = setTimeout(() => {
-			setChatflyoutopen(false)
-		}, 150)
-	}, [])
-
-	// Cleanup on unmount
+	// Close thread panel when navigating away from chat
 	useEffect(() => {
-		return () => {
-			if (flyoutopentimeout.current) clearTimeout(flyoutopentimeout.current)
-			if (flyoutclosetimeout.current) clearTimeout(flyoutclosetimeout.current)
+		if (!pathname.includes("/chat")) {
+			setthreadpanelopen(false)
 		}
-	}, [])
-
-	// Close flyout on route change
-	// biome-ignore lint/correctness/useExhaustiveDependencies: stable reference
-	useEffect(() => {
-		setChatflyoutopen(false)
-	}, [pathname])
+	}, [pathname, setthreadpanelopen])
 
 	const ischatactive = pathname.includes("/chat")
-	const isexpanded = !collapsed
+	const isvisiblyexpanded = open
 
 	return (
-		<div className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto justify-between">
-			<div className="flex flex-1 flex-col">
-				{/* ── Header: Logo + Toggle ── */}
-				<div className="flex items-center justify-between mb-1">
-					{isexpanded ? (
-						<Logo />
-					) : (
-						<div className="h-5 w-6 shrink-0 rounded-tl-lg rounded-tr-sm rounded-br-lg rounded-bl-sm bg-black dark:bg-white" />
-					)}
-					{/* Burger icon when expanded, chevron arrow when collapsed+hovered */}
-					{isexpanded ? (
-						<button
-							type="button"
-							onClick={togglecollapsed}
-							className="p-1 rounded-md hover:bg-accent transition-colors shrink-0"
-							aria-label="Collapse sidebar"
-						>
-							<IconMenu2 className="size-4 text-neutral-700 dark:text-neutral-200" />
-						</button>
-					) : (
-						<AnimatePresence>
-							{hovered ? (
-								<motion.button
-									key="expand-arrow"
-									initial={{ opacity: 0 }}
-									animate={{ opacity: 1 }}
-									exit={{ opacity: 0 }}
-									transition={{ duration: 0.12 }}
-									onClick={togglecollapsed}
-									className="p-1 rounded-md hover:bg-accent transition-colors shrink-0"
-									aria-label="Expand sidebar"
-								>
-									<IconChevronRight className="size-4 text-neutral-700 dark:text-neutral-200" />
-								</motion.button>
-							) : null}
-						</AnimatePresence>
-					)}
-				</div>
-
-				{/* ── Spacer (org switcher removed) ── */}
-				<div className="mt-4" />
-
-				{/* ── Nav items ── */}
-				<div className="flex flex-col gap-2">
-					{sidebarItems.map(({ id, hasflyout, ...item }) => {
-						if (id === "chat" && hasflyout) {
-							return (
-								<div
-									key={id}
-									ref={chatitemref}
-									className="relative"
-									onMouseEnter={openflyout}
-									onMouseLeave={closeflyout}
-								>
-									<SidebarLink link={item} className={ischatactive ? "bg-accent/50 rounded-md px-1" : "px-1"}>
-										<IconChevronRight className="size-3.5 text-muted-foreground" />
-									</SidebarLink>
-
-									{/* Flyout panel */}
-									<AnimatePresence>
-										{chatflyoutopen && (
-											<motion.div
-												ref={flyoutref}
-												initial={{ opacity: 0, x: -8 }}
-												animate={{ opacity: 1, x: 0 }}
-												exit={{ opacity: 0, x: -8 }}
-												transition={{ duration: 0.15 }}
-												className="fixed z-[100] top-0 h-screen w-[320px] shadow-xl border-r bg-background"
-												style={{ left: isexpanded ? "300px" : "60px" }}
-												onMouseEnter={openflyout}
-												onMouseLeave={closeflyout}
-											>
-												<ChatSidebar onNavigate={() => setChatflyoutopen(false)} />
-											</motion.div>
-										)}
-									</AnimatePresence>
-								</div>
-							)
-						}
-
-						// Logout must NOT be a <Link> — prefetch would trigger the sign-out API
-						if (id === "logout") {
-							return (
-								<button
-									type="button"
-									key={id}
-									onClick={() => {
-										window.location.href = item.href
-									}}
-									className="flex items-center justify-start gap-2 group/sidebar py-2 w-full text-left"
-								>
-									{item.icon}
-									{isexpanded && (
-										<motion.span
-											initial={{ opacity: 0 }}
-											animate={{ opacity: 1 }}
-											className="text-neutral-700 dark:text-neutral-200 text-sm group-hover/sidebar:translate-x-1 transition duration-150 whitespace-pre inline-block !p-0 !m-0"
-										>
-											{item.label}
-										</motion.span>
-									)}
-								</button>
-							)
-						}
-
-						return <SidebarLink key={id} link={item} />
-					})}
-				</div>
-			</div>
-
-			{/* ── Footer ── */}
-			<div>
-				<div className="flex flex-row items-center justify-between">
-					<Link
-						href="/settings/profile"
-						className="flex flex-row items-center justify-start gap-2 group/sidebar py-2 rounded-md hover:bg-accent/50 transition-colors px-1 -mx-1"
+		<>
+			<AnimatePresence mode="wait" initial={false}>
+				{threadpanelopen ? (
+					// ── Thread panel ──
+					<motion.div
+						key="threads"
+						className="flex flex-col w-full h-full"
+						initial={{ opacity: 0 }}
+						animate={{ opacity: 1 }}
+						exit={{ opacity: 0 }}
+						transition={{ duration: 0.14, delay: 0.08 }}
 					>
-						<Avatar className="size-8 border border-neutral-600 dark:border-neutral-400">
-							<AvatarImage src={image ?? ""} />
-							<AvatarFallback>{name?.charAt(0)}</AvatarFallback>
-						</Avatar>
-						{isexpanded && (
-							<motion.p
-								initial={{ opacity: 0 }}
-								animate={{ opacity: 1 }}
-								className="text-neutral-700 dark:text-neutral-200 text-sm group-hover/sidebar:translate-x-1 transition duration-150 whitespace-pre inline-block p-0 m-0"
+						<ChatSidebar onClose={() => setthreadpanelopen(false)} />
+					</motion.div>
+				) : (
+					// ── Normal nav ──
+					<motion.div
+						key="nav"
+						className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto justify-between w-full"
+						initial={{ opacity: 0 }}
+						animate={{ opacity: 1 }}
+						exit={{ opacity: 0 }}
+						transition={{ duration: 0.1 }}
+					>
+						<div className="flex flex-1 flex-col">
+							{/* Header: Logo + Collapse (expanded) or Expand button (collapsed) */}
+							<div className="flex items-center justify-between mb-1">
+								{isvisiblyexpanded ? (
+									<>
+										<Logo />
+										<button
+											type="button"
+											onClick={() => useSidebarStore.getState().setcollapsed(true)}
+											className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+											aria-label="Collapse sidebar"
+										>
+											<IconChevronLeft className="size-4" />
+										</button>
+									</>
+								) : (
+									<button
+										type="button"
+										onClick={() => useSidebarStore.getState().setcollapsed(false)}
+										className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+										aria-label="Expand sidebar"
+									>
+										<IconChevronRight className="size-4" />
+									</button>
+								)}
+							</div>
+
+							<div className="mt-4" />
+
+							{/* Nav items — logout is handled in the footer */}
+							<div className="flex flex-col gap-2">
+								{sidebarItems
+									.filter(({ id }) => id !== "logout")
+									.map(({ id, hasflyout, ...item }) => {
+										if (id === "chat" && hasflyout) {
+											return (
+												<div
+													key={id}
+													role="button"
+													tabIndex={0}
+													onClick={() => setthreadpanelopen(true)}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" || e.key === " ") setthreadpanelopen(true)
+													}}
+													className="cursor-pointer"
+													aria-label="Open threads"
+												>
+													<SidebarLink link={item} className={ischatactive ? "bg-accent/50 rounded-md px-1" : "px-1"}>
+														<IconChevronRight className="size-3.5 text-muted-foreground" />
+													</SidebarLink>
+												</div>
+											)
+										}
+
+										return <SidebarLink key={id} link={item} />
+									})}
+							</div>
+						</div>
+
+						{/* Footer: avatar + theme toggle + sign out */}
+						<div className="flex flex-row items-center justify-between gap-2">
+							<Link
+								href="/settings/profile"
+								className="flex flex-row items-center justify-start gap-2 group/sidebar py-2 rounded-md hover:bg-accent/50 transition-colors px-1 -mx-1 min-w-0"
 							>
-								{name}
-							</motion.p>
-						)}
-					</Link>
-					{isexpanded && <ThemeSwitch />}
-				</div>
-			</div>
-		</div>
+								<Avatar className="size-8 shrink-0 border border-neutral-600 dark:border-neutral-400">
+									<AvatarImage src={image ?? ""} />
+									<AvatarFallback>{name?.charAt(0)}</AvatarFallback>
+								</Avatar>
+								{isvisiblyexpanded && (
+									<motion.p
+										initial={{ opacity: 0 }}
+										animate={{ opacity: 1 }}
+										className="text-neutral-700 dark:text-neutral-200 text-sm group-hover/sidebar:translate-x-1 transition duration-150 whitespace-pre inline-block p-0 m-0 truncate"
+									>
+										{name}
+									</motion.p>
+								)}
+							</Link>
+
+							{isvisiblyexpanded && (
+								<div className="flex items-center gap-1 shrink-0">
+									<ThemeSwitch />
+									<TooltipProvider delayDuration={300}>
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<button
+													type="button"
+													onClick={() => setsignoutopen(true)}
+													className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+													aria-label="Sign out"
+												>
+													<IconLogout className="size-4" />
+												</button>
+											</TooltipTrigger>
+											<TooltipContent side="top">Sign out</TooltipContent>
+										</Tooltip>
+									</TooltipProvider>
+								</div>
+							)}
+						</div>
+					</motion.div>
+				)}
+			</AnimatePresence>
+
+			{/* Sign-out confirmation */}
+			<AlertDialog open={signoutopen} onOpenChange={setsignoutopen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Sign out?</AlertDialogTitle>
+						<AlertDialogDescription>You will be redirected to the login page.</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => {
+								window.location.href = "/api/auth/sign-out"
+							}}
+						>
+							Sign out
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		</>
 	)
 }
 
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
 const Sidebar = () => {
-	const { collapsed, togglecollapsed } = useSidebarStore()
-	const open = !collapsed
+	const { collapsed } = useSidebarStore()
+	const [threadpanelopen, setthreadpanelopen] = useState(false)
+
+	const open = threadpanelopen ? true : !collapsed
+
 	const setOpen = (val: boolean | ((prev: boolean) => boolean)) => {
-		const newval = typeof val === "function" ? val(open) : val
+		if (threadpanelopen) return
+		const newval = typeof val === "function" ? val(!collapsed) : val
 		useSidebarStore.getState().setcollapsed(!newval)
 	}
 
 	return (
 		<RootSidebar open={open} setOpen={setOpen} animate={true}>
-			<SidebarBody className="justify-between gap-10">
-				<SidebarContent collapsed={collapsed} togglecollapsed={togglecollapsed} />
+			<SidebarBody
+				className={cn(threadpanelopen ? "!p-0 justify-start gap-0" : "justify-between gap-10")}
+				{...(threadpanelopen ? { animate: { width: "400px" } } : {})}
+			>
+				<SidebarContent
+					collapsed={collapsed}
+					threadpanelopen={threadpanelopen}
+					setthreadpanelopen={setthreadpanelopen}
+				/>
 			</SidebarBody>
 		</RootSidebar>
 	)
 }
 
+// ---------------------------------------------------------------------------
+// Logo
+// ---------------------------------------------------------------------------
+
 export const Logo = () => {
 	return (
-		<Link href="#" className="relative z-20 flex items-center space-x-2 py-1 text-sm font-normal text-black">
-			<div className="h-5 w-6 shrink-0 rounded-tl-lg rounded-tr-sm rounded-br-lg rounded-bl-sm bg-black dark:bg-white" />
+		<Link href="#" className="relative z-20 flex items-center py-1 text-sm font-normal">
 			<motion.span
 				initial={{ opacity: 0 }}
 				animate={{ opacity: 1 }}
-				className="font-medium whitespace-pre text-black dark:text-white"
+				className="font-semibold whitespace-pre text-black dark:text-white"
 			>
 				OpenZosma
 			</motion.span>

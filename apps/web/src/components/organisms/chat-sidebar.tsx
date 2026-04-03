@@ -10,275 +10,306 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/src/components/ui/alert-dialog"
-import { Badge } from "@/src/components/ui/badge"
 import { Button } from "@/src/components/ui/button"
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/src/components/ui/dropdown-menu"
 import { Input } from "@/src/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/src/components/ui/select"
+import { ScrollArea } from "@/src/components/ui/scroll-area"
 import { Skeleton } from "@/src/components/ui/skeleton"
 import useDeleteConversation from "@/src/hooks/chat/use-delete-conversation"
 import useGetConversations from "@/src/hooks/chat/use-get-conversations"
 import { cn } from "@/src/lib/utils"
-import { IconMessageCircle, IconPlus, IconRobot, IconSearch, IconTrash } from "@tabler/icons-react"
+import type { ConversationSummary } from "@/src/services/chat.services"
+import { IconChevronLeft, IconDotsVertical, IconMessageCircle, IconSearch, IconTrash, IconX } from "@tabler/icons-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
-type DateFilter = "all" | "today" | "week" | "month"
+// ---------------------------------------------------------------------------
+// Date grouping
+// ---------------------------------------------------------------------------
 
-const iswithinrange = (datestr: string, filter: DateFilter): boolean => {
-	if (filter === "all") return true
-	const date = new Date(datestr)
-	const now = new Date()
-	const startoftoday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-	if (filter === "today") return date >= startoftoday
-	if (filter === "week") {
-		const weekago = new Date(startoftoday)
-		weekago.setDate(weekago.getDate() - 6)
-		return date >= weekago
-	}
-	if (filter === "month") {
-		const monthago = new Date(startoftoday)
-		monthago.setDate(monthago.getDate() - 29)
-		return date >= monthago
-	}
-	return true
+interface DateGroup {
+	label: string
+	items: ConversationSummary[]
 }
 
-const formattime = (datestr: string): string => {
-	const date = new Date(datestr)
+const groupByDate = (conversations: ConversationSummary[]): DateGroup[] => {
 	const now = new Date()
-	const diffms = now.getTime() - date.getTime()
-	const diffhrs = diffms / (1000 * 60 * 60)
+	const sod = (offsetDays = 0): Date => {
+		const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+		d.setDate(d.getDate() + offsetDays)
+		return d
+	}
 
-	if (diffhrs < 1) return "Just now"
-	if (diffhrs < 24) return `${Math.floor(diffhrs)}h ago`
-	if (diffhrs < 48) return "Yesterday"
-	return date.toLocaleDateString()
+	const groups: DateGroup[] = [
+		{ label: "Today", items: [] },
+		{ label: "Yesterday", items: [] },
+		{ label: "Previous 7 days", items: [] },
+		{ label: "Previous 30 days", items: [] },
+		{ label: "Older", items: [] },
+	]
+
+	const [today, yesterday, week, month] = [sod(0), sod(-1), sod(-6), sod(-29)]
+
+	for (const conv of conversations) {
+		const d = new Date(conv.updatedat)
+		if (d >= today) groups[0].items.push(conv)
+		else if (d >= yesterday) groups[1].items.push(conv)
+		else if (d >= week) groups[2].items.push(conv)
+		else if (d >= month) groups[3].items.push(conv)
+		else groups[4].items.push(conv)
+	}
+
+	return groups.filter((g) => g.items.length > 0)
 }
+
+// ---------------------------------------------------------------------------
+// Skeleton
+// ---------------------------------------------------------------------------
 
 const ConversationSkeleton = () => (
-	<div className="flex flex-col gap-1 p-2">
-		{Array.from({ length: 5 }).map((_, i) => (
-			<div key={i} className="flex flex-col gap-1.5 rounded-lg p-3">
-				<Skeleton className="h-3.5 w-3/4" />
-				<Skeleton className="h-2.5 w-full" />
-				<Skeleton className="h-2.5 w-1/3" />
+	<div className="flex flex-col gap-0.5 px-2 pt-4">
+		{[70, 50, 80, 55, 65, 45, 75].map((w, i) => (
+			<div key={i} className="flex flex-col gap-1.5 rounded-md px-3 py-2.5">
+				<Skeleton className="h-3" style={{ width: `${w}%` }} />
+				<Skeleton className="h-2.5 w-2/5" />
 			</div>
 		))}
 	</div>
 )
 
-const ChatSidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
+// ---------------------------------------------------------------------------
+// Thread item
+// ---------------------------------------------------------------------------
+
+interface ThreadItemProps {
+	conv: ConversationSummary
+	isactive: boolean
+	onRequestDelete: (id: string) => void
+}
+
+const ThreadItem = ({ conv, isactive, onRequestDelete }: ThreadItemProps) => (
+	<div
+		className={cn(
+			// overflow-hidden + w-full ensure the text truncation chain is complete
+			// and nothing leaks outside the item box
+			"group relative flex items-center w-full overflow-hidden rounded-md transition-colors",
+			isactive ? "bg-accent" : "hover:bg-accent/50",
+		)}
+	>
+		{/*
+		 * min-w-0 on the link allows it to shrink below content width in flex.
+		 * pr-7 (28px) reserves space for the 24px options button + 4px gap.
+		 * Without pr-7 the button overlaps the text.
+		 */}
+		<Link
+			href={`/chat/${conv.id}`}
+			className={cn(
+				"flex-1 min-w-0 px-3 py-2 pr-7 rounded-md",
+				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+			)}
+		>
+			<p
+				className={cn(
+					"text-sm font-medium truncate leading-snug",
+					isactive ? "text-accent-foreground" : "text-foreground/90",
+				)}
+			>
+				{conv.title}
+			</p>
+			{conv.lastmessage && (
+				<p className="text-xs text-muted-foreground/70 mt-0.5 leading-snug pl-px w-0 min-w-full overflow-hidden whitespace-nowrap text-ellipsis">
+					{conv.lastmessage}
+				</p>
+			)}
+		</Link>
+
+		{/* Options button — absolute so it doesn't affect link width */}
+		<div
+			className={cn(
+				"absolute right-1 top-1/2 -translate-y-1/2 shrink-0 transition-opacity",
+				"opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+				isactive && "opacity-100",
+			)}
+		>
+			<DropdownMenu>
+				<DropdownMenuTrigger asChild>
+					<Button
+						variant="ghost"
+						size="icon"
+						className="h-6 w-6 text-muted-foreground hover:text-foreground"
+						aria-label="Thread options"
+					>
+						<IconDotsVertical className="size-3.5" />
+					</Button>
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align="end" className="w-36">
+					<DropdownMenuItem
+						className="gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
+						onSelect={() => onRequestDelete(conv.id)}
+					>
+						<IconTrash className="size-3.5" />
+						Delete
+					</DropdownMenuItem>
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</div>
+	</div>
+)
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+interface ChatSidebarProps {
+	onClose: () => void
+}
+
+const ChatSidebar = ({ onClose }: ChatSidebarProps) => {
 	const router = useRouter()
 	const pathname = usePathname()
 	const [search, setSearch] = useState("")
-	const [datefilter, setDatefilter] = useState<DateFilter>("all")
-	const [agentfilter, setAgentfilter] = useState("all")
 	const [pendingdeleteid, setPendingdeleteid] = useState<string | null>(null)
 
-	const activeconversationid = pathname.split("/chat/")[1] || null
+	const activeconversationid = pathname.split("/chat/")[1] ?? null
 
 	const { data: conversations = [], isLoading: loading } = useGetConversations()
 	const deleteConversation = useDeleteConversation()
 
-	const agentnames = useMemo(() => {
-		const names = new Set<string>()
-		for (const c of conversations) {
-			if (c.agentname) names.add(c.agentname)
-		}
-		return Array.from(names).sort()
-	}, [conversations])
+	const filtered = useMemo(() => {
+		const q = search.trim().toLowerCase()
+		if (!q) return conversations
+		return conversations.filter(
+			(c) =>
+				c.title.toLowerCase().includes(q) ||
+				(c.lastmessage?.toLowerCase().includes(q) ?? false) ||
+				(c.agentname?.toLowerCase().includes(q) ?? false),
+		)
+	}, [conversations, search])
 
-	const filteredconversations = useMemo(
-		() =>
-			conversations.filter((c) => {
-				const matchessearch =
-					c.title.toLowerCase().includes(search.toLowerCase()) ||
-					(c.agentname?.toLowerCase().includes(search.toLowerCase()) ?? false) ||
-					(c.lastmessage?.toLowerCase().includes(search.toLowerCase()) ?? false)
-				const matchesdate = iswithinrange(c.updatedat, datefilter)
-				const matchesagent = agentfilter === "all" || c.agentname === agentfilter
-				return matchessearch && matchesdate && matchesagent
-			}),
-		[conversations, search, datefilter, agentfilter],
-	)
+	const groups = useMemo(() => groupByDate(filtered), [filtered])
 
-	const handledeleteconfirm = async () => {
+	const handleDeleteConfirm = async () => {
 		if (!pendingdeleteid) return
-		const idtodelete = pendingdeleteid
+		const id = pendingdeleteid
 		setPendingdeleteid(null)
 		try {
-			await deleteConversation.mutateAsync(idtodelete)
+			await deleteConversation.mutateAsync(id)
 			toast.success("Conversation deleted")
-			if (activeconversationid === idtodelete) {
-				router.push("/chat")
-			}
+			if (activeconversationid === id) router.push("/chat")
 		} catch {
 			toast.error("Failed to delete conversation")
 		}
 	}
 
-	const hasactivefilters = search !== "" || datefilter !== "all" || agentfilter !== "all"
-
 	return (
 		<>
+			{/*
+			 * h-full fills the motion.div wrapper in sidebar.tsx (which itself
+			 * fills the DesktopSidebar container). flex flex-col lets ScrollArea
+			 * take the remaining height via flex-1.
+			 */}
 			<div className="flex flex-col h-full w-full bg-sidebar border-r">
-				{/* Header */}
-				<div className="flex items-center justify-between p-4 border-b shrink-0">
-					<h3 className="font-semibold text-sm">Conversations</h3>
-					<Button size="icon-sm" variant="ghost" asChild>
-						<Link href="/chat" onClick={onNavigate}>
-							<IconPlus className="size-4" />
-						</Link>
-					</Button>
+				{/* ── Header ── */}
+				<div className="flex items-center gap-1.5 px-4 pt-4 pb-3 shrink-0 border-b border-border/50">
+					<button
+						type="button"
+						onClick={onClose}
+						className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+						aria-label="Back to navigation"
+					>
+						<IconChevronLeft className="size-4" />
+					</button>
+					<span className="text-sm font-semibold flex-1 text-foreground select-none">Threads</span>
 				</div>
 
-				{/* Search + Filters */}
-				<div className="p-3 shrink-0 flex flex-col gap-2">
+				{/* ── Search ── */}
+				<div className="px-3 py-2.5 shrink-0">
 					<div className="relative">
-						<IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+						<IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
 						<Input
-							placeholder="Search conversations..."
+							placeholder="Search threads..."
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
-							className="pl-8 h-8 text-sm"
+							className="pl-8 pr-7 h-8 text-sm bg-accent/30 border-transparent focus-visible:border-input focus-visible:bg-background"
 						/>
-					</div>
-					<div className="flex gap-1.5">
-						<Select value={datefilter} onValueChange={(v) => setDatefilter(v as DateFilter)}>
-							<SelectTrigger className="h-7 text-xs flex-1">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="all">All time</SelectItem>
-								<SelectItem value="today">Today</SelectItem>
-								<SelectItem value="week">Last 7 days</SelectItem>
-								<SelectItem value="month">Last 30 days</SelectItem>
-							</SelectContent>
-						</Select>
-						{agentnames.length > 0 && (
-							<Select value={agentfilter} onValueChange={setAgentfilter}>
-								<SelectTrigger className="h-7 text-xs flex-1">
-									<SelectValue placeholder="Agent" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="all">All agents</SelectItem>
-									{agentnames.map((name) => (
-										<SelectItem key={name} value={name}>
-											{name}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
+						{search && (
+							<button
+								type="button"
+								onClick={() => setSearch("")}
+								className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+								aria-label="Clear search"
+							>
+								<IconX className="size-3.5" />
+							</button>
 						)}
 					</div>
 				</div>
 
-				{/* Conversation List */}
-				<div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+				{/* ── Thread list ── */}
+				<ScrollArea className="flex-1 min-h-0">
 					{loading ? (
 						<ConversationSkeleton />
-					) : filteredconversations.length === 0 ? (
-						<div className="flex flex-col items-center gap-3 py-8 px-4">
-							<IconMessageCircle className="size-8 text-muted-foreground/50" />
-							<p className="text-xs text-muted-foreground text-center">
-								{hasactivefilters ? "No matching conversations" : "No conversations yet"}
-							</p>
-							{!hasactivefilters && (
-								<Button size="sm" variant="outline" className="text-xs" asChild>
-									<Link href="/chat" onClick={onNavigate}>
-										<IconPlus className="size-3" />
-										Start a conversation
-									</Link>
+					) : filtered.length === 0 ? (
+						<div className="flex flex-col items-center gap-3 py-16 px-6 text-center">
+							<div className="rounded-full bg-accent p-3 shrink-0">
+								<IconMessageCircle className="size-5 text-muted-foreground" />
+							</div>
+							<div>
+								<p className="text-sm font-medium text-foreground">{search ? "No results" : "No threads yet"}</p>
+								<p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+									{search ? "Try different keywords" : "Start a conversation to see it here"}
+								</p>
+							</div>
+							{!search && (
+								<Button size="sm" variant="outline" className="mt-1 h-8 text-xs" asChild>
+									<Link href="/chat">New conversation</Link>
 								</Button>
 							)}
 						</div>
 					) : (
-						<div className="flex flex-col gap-1 p-2">
-							{filteredconversations.map((conv) => (
-								<div
-									key={conv.id}
-									role="button"
-									tabIndex={0}
-									onClick={() => {
-										router.push(`/chat/${conv.id}`)
-										onNavigate?.()
-									}}
-									onKeyDown={(e) => {
-										if (e.key === "Enter" || e.key === " ") {
-											router.push(`/chat/${conv.id}`)
-											onNavigate?.()
-										}
-									}}
-									className={cn(
-										"group flex flex-col gap-1 rounded-lg p-3 text-left transition-colors cursor-pointer",
-										activeconversationid === conv.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-									)}
-								>
-									{/* Title + delete */}
-									<div className="flex items-center gap-2">
-										<span
-											className="text-sm font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
-											style={{ minWidth: 0 }}
-										>
-											{conv.title}
-										</span>
-										<button
-											type="button"
-											onClick={(e) => {
-												e.stopPropagation()
-												setPendingdeleteid(conv.id)
-											}}
-											className="hidden group-hover:flex shrink-0 items-center justify-center w-6 h-6 rounded hover:bg-destructive/10"
-											aria-label="Delete conversation"
-										>
-											<IconTrash className="size-3.5 text-muted-foreground hover:text-destructive" />
-										</button>
-									</div>
-
-									{/* Last message preview */}
-									<span
-										className="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap"
-										style={{ minWidth: 0 }}
-									>
-										{conv.lastmessage ?? "No messages yet"}
-									</span>
-
-									{/* Agent + timestamp */}
-									<div className="flex items-center justify-between gap-2 mt-0.5">
-										{conv.agentname ? (
-											<Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 gap-0.5">
-												<IconRobot className="size-2.5" />
-												{conv.agentname}
-											</Badge>
-										) : (
-											<span />
-										)}
-										<span className="text-[10px] text-muted-foreground/70 shrink-0 whitespace-nowrap">
-											{formattime(conv.updatedat)}
-										</span>
+						<div className="px-2 pb-6 w-full">
+							{groups.map((group) => (
+								<div key={group.label}>
+									<p className="px-3 pt-5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/50 select-none">
+										{group.label}
+									</p>
+									<div className="flex flex-col gap-0.5">
+										{group.items.map((conv) => (
+											<ThreadItem
+												key={conv.id}
+												conv={conv}
+												isactive={activeconversationid === conv.id}
+												onRequestDelete={setPendingdeleteid}
+											/>
+										))}
 									</div>
 								</div>
 							))}
 						</div>
 					)}
-				</div>
+				</ScrollArea>
 			</div>
 
-			{/* Delete confirmation dialog */}
+			{/* ── Delete confirmation ── */}
 			<AlertDialog open={pendingdeleteid !== null} onOpenChange={(open) => !open && setPendingdeleteid(null)}>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+						<AlertDialogTitle>Delete thread?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This will permanently delete the conversation and all its messages. This action cannot be undone.
+							This will permanently delete the conversation and all its messages. This cannot be undone.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={handledeleteconfirm}
+							onClick={handleDeleteConfirm}
 							className="bg-destructive text-white hover:bg-destructive/90"
 						>
 							Delete
